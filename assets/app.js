@@ -206,136 +206,199 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   // ====== 圖片 Modal ======
-  const ensureImgModal = () => {
+    const ensureImgModal = () => {
     let modal = document.getElementById(IDS.imgModal);
-
-    // 若 HTML 先放了一個空的 #imgModal（例如 index.html 內），這裡要補齊結構
-    const buildModal = (el) => {
-      el.id = IDS.imgModal;
-      el.setAttribute(
-        "style",
-        [
-          "position:fixed",
-          "inset:0",
-          "background: rgba(0,0,0,0.35)",
-          "display:none",
-          "align-items:center",
-          "justify-content:center",
-          "z-index:9998",
-          "padding: 18px",
-        ].join(";")
-      );
-
-      el.innerHTML = `
-        <div style="width:min(900px, 96vw); max-height: 90vh; overflow:auto; background:rgba(255,255,255,0.92); border-radius:18px; border:1px solid rgba(0,0,0,0.10); box-shadow: 0 22px 60px rgba(0,0,0,0.20);">
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding: 14px 16px; border-bottom: 1px solid rgba(0,0,0,0.08);">
-            <h3 id="${IDS.imgTitle}" style="margin:0; font-size:15px; font-weight:600;">商品圖片</h3>
-            <button id="${IDS.closeImg}" style="border:0; background:transparent; font-size:20px; cursor:pointer;">×</button>
-          </div>
-          <div id="${IDS.imgBody}" style="padding: 14px 16px;"></div>
-        </div>
-      `;
-
-      // 重新綁定事件（避免重複 addEventListener）
-      const closeBtn = document.getElementById(IDS.closeImg);
-      if (closeBtn) closeBtn.onclick = closeImgModal;
-
-      el.onclick = (e) => {
-        if (e.target === el) closeImgModal();
-      };
-    };
-
-    if (modal) {
-      // 若缺少必要節點，就補齊（避免 openImgModal 取到 null）
-      const hasTitle = !!document.getElementById(IDS.imgTitle);
-      const hasBody = !!document.getElementById(IDS.imgBody);
-      const hasClose = !!document.getElementById(IDS.closeImg);
-      if (!hasTitle || !hasBody || !hasClose) buildModal(modal);
-      return modal;
-    }
+    if (modal) return modal;
 
     modal = document.createElement("div");
-    buildModal(modal);
+    modal.id = IDS.imgModal;
+    modal.className = "toyod-modal";
+    modal.setAttribute(
+      "style",
+      [
+        "position:fixed",
+        "inset:0",
+        "background: rgba(0,0,0,0.35)",
+        "display:none",
+        "align-items:center",
+        "justify-content:center",
+        "z-index:9998",
+        "padding: 18px",
+      ].join(";")
+    );
+
+    modal.innerHTML = `
+      <div class="toyod-modalCard" style="width:min(920px, 96vw); max-height: 90vh; overflow:auto; background:rgba(255,255,255,0.92); border-radius:18px; border:1px solid rgba(0,0,0,0.10); box-shadow: 0 22px 60px rgba(0,0,0,0.20);">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding: 14px 16px; border-bottom: 1px solid rgba(0,0,0,0.08);">
+          <h3 data-img-title style="margin:0; font-size:15px; font-weight:600;">商品圖片</h3>
+          <button data-img-close style="border:0; background:transparent; font-size:20px; cursor:pointer;">×</button>
+        </div>
+
+        <div style="padding: 14px 16px;">
+          <div class="toyod-carousel" style="position:relative; border-radius:16px; overflow:hidden; border:1px solid rgba(0,0,0,0.08); background:#fff;">
+            <button data-img-prev aria-label="上一張"
+              style="position:absolute; left:10px; top:50%; transform:translateY(-50%); width:38px; height:38px; border-radius:999px; border:1px solid rgba(0,0,0,0.12); background:rgba(255,255,255,0.75); cursor:pointer; display:flex; align-items:center; justify-content:center;">
+              ‹
+            </button>
+
+            <a data-img-link target="_blank" rel="noreferrer"
+               style="display:block; width:100%; height:min(60vh, 520px); background:rgba(0,0,0,0.03);">
+              <img data-img-main alt=""
+                   style="width:100%; height:100%; object-fit:contain; display:block;">
+            </a>
+
+            <button data-img-next aria-label="下一張"
+              style="position:absolute; right:10px; top:50%; transform:translateY(-50%); width:38px; height:38px; border-radius:999px; border:1px solid rgba(0,0,0,0.12); background:rgba(255,255,255,0.75); cursor:pointer; display:flex; align-items:center; justify-content:center;">
+              ›
+            </button>
+
+            <div data-img-dots
+                 style="position:absolute; left:0; right:0; bottom:10px; display:flex; justify-content:center; gap:6px; pointer-events:none;">
+            </div>
+          </div>
+
+          <div data-img-thumbs style="margin-top:10px; display:flex; gap:10px; overflow:auto; padding:4px 2px; -webkit-overflow-scrolling:touch;"></div>
+          <div data-img-desc style="margin-top:12px; font-size:13px; line-height:1.75; opacity:.85; white-space:pre-wrap;"></div>
+        </div>
+      </div>
+    `;
+
     document.body.appendChild(modal);
+
+    // Close
+    modal.querySelector("[data-img-close]")?.addEventListener("click", closeImgModal);
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) closeImgModal();
+    });
+
+    // ESC
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") closeImgModal();
+    });
+
     return modal;
   };
 
-  const normalizeImageUrl = (u) => {
-    let s = String(u || "").trim();
-    if (!s) return "";
-    // upgrade http to https (GitHub Pages blocks mixed content)
-    if (s.startsWith("http://")) s = "https://" + s.slice(7);
-    // Google Drive share -> direct view
-    const m1 = s.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
-    if (m1) return `https://drive.google.com/uc?export=view&id=${m1[1]}`;
-    const m2 = s.match(/drive\.google\.com\/open\?id=([a-zA-Z0-9_-]+)/);
-    if (m2) return `https://drive.google.com/uc?export=view&id=${m2[1]}`;
-    return s;
-  };
-
-  const normalizeImages = (images) => {
-    if (!images) return [];
-    if (Array.isArray(images)) return images.filter(Boolean).map(normalizeImageUrl).filter(Boolean);
-    if (typeof images === "string") {
-      const parts = images.split(/[,|]/g).map((s) => s.trim()).filter(Boolean);
-      return (parts.length ? parts : [images]).map(normalizeImageUrl).filter(Boolean);
-    }
-    return [];
-  };
-
-  const normalizeStyles = (styles) => {
-    if (!styles) return [];
-    if (Array.isArray(styles)) return styles.filter(Boolean).map(String);
-    if (typeof styles === "string") {
-      return styles
-        .split(/\n|,|、/g)
-        .map((s) => s.trim())
-        .filter(Boolean);
-    }
-    return [];
-  };
-
   const openImgModal = (product) => {
-    ensureImgModal();
-    const modal = document.getElementById(IDS.imgModal);
-    let titleEl = document.getElementById(IDS.imgTitle);
-    let bodyEl = document.getElementById(IDS.imgBody);
+    const modal = ensureImgModal();
 
-    // 保險：若頁面上先存在空的 #imgModal，可能造成 title/body 為 null
-    if (!titleEl || !bodyEl) {
-      ensureImgModal();
-      titleEl = document.getElementById(IDS.imgTitle);
-      bodyEl = document.getElementById(IDS.imgBody);
-    }
-    if (!titleEl || !bodyEl) {
-      console.warn('[tenyears_oneday] img modal elements missing');
-      return;
-    }
-
-    titleEl.textContent = product?.name ? `商品圖片｜${product.name}` : "商品圖片";
+    const titleEl = modal.querySelector("[data-img-title]");
+    const mainImg = modal.querySelector("[data-img-main]");
+    const linkEl = modal.querySelector("[data-img-link]");
+    const thumbsEl = modal.querySelector("[data-img-thumbs]");
+    const descEl = modal.querySelector("[data-img-desc]");
+    const dotsEl = modal.querySelector("[data-img-dots]");
+    const prevBtn = modal.querySelector("[data-img-prev]");
+    const nextBtn = modal.querySelector("[data-img-next]");
 
     const imgs = normalizeImages(product?.images);
     const desc = escapeHtml(product?.description || "");
+    const titleText = product?.name ? `商品圖片｜${product.name}` : "商品圖片";
 
-    bodyEl.innerHTML = `
-      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
-        ${imgs
-          .map(
-            (src) => `
-          <a href="${escapeHtml(src)}" target="_blank" rel="noreferrer"
-             style="display:block; border-radius: 14px; overflow:hidden; border:1px solid rgba(0,0,0,0.08); background:#fff;">
-            <img src="${escapeHtml(src)}" alt="" style="width:100%; height: 260px; object-fit: cover; display:block;">
-          </a>`
-          )
-          .join("")}
-      </div>
-      ${
-        desc
-          ? `<div style="margin-top:12px; font-size:13px; line-height:1.75; opacity:.85; white-space:pre-wrap;">${desc}</div>`
-          : ""
+    if (titleEl) titleEl.textContent = titleText;
+    if (descEl) descEl.innerHTML = desc ? desc : "";
+
+    // 沒圖片就給一個空狀態
+    if (!imgs.length) {
+      if (mainImg) mainImg.removeAttribute("src");
+      if (linkEl) linkEl.removeAttribute("href");
+      if (thumbsEl) thumbsEl.innerHTML = `<div style="font-size:12px; opacity:.7;">沒有圖片</div>`;
+      if (dotsEl) dotsEl.innerHTML = "";
+      if (prevBtn) prevBtn.style.display = "none";
+      if (nextBtn) nextBtn.style.display = "none";
+      modal.style.display = "flex";
+      return;
+    }
+
+    // state
+    const state = {
+      imgs,
+      idx: 0,
+    };
+    modal.__toyod_state = state;
+
+    const render = () => {
+      const i = state.idx;
+      const src = imgs[i];
+
+      if (mainImg) mainImg.src = src;
+      if (linkEl) linkEl.href = src;
+
+      // thumbs
+      if (thumbsEl) {
+        thumbsEl.innerHTML = imgs
+          .map((u, k) => {
+            const active = k === i;
+            return `
+              <button data-thumb="${k}"
+                style="flex:0 0 auto; width:68px; height:68px; border-radius:14px; overflow:hidden; border:1px solid rgba(0,0,0,${active ? "0.28" : "0.10"}); background:#fff; cursor:pointer; outline:${active ? "2px solid rgba(34,52,40,.55)" : "none"};">
+                <img src="${escapeHtml(u)}" alt="" style="width:100%; height:100%; object-fit:cover; display:block;">
+              </button>
+            `;
+          })
+          .join("");
+
+        thumbsEl.querySelectorAll("[data-thumb]").forEach((b) => {
+          b.addEventListener("click", () => {
+            state.idx = Number(b.dataset.thumb) || 0;
+            render();
+          });
+        });
       }
-    `;
 
+      // dots
+      if (dotsEl) {
+        dotsEl.innerHTML = imgs
+          .map((_, k) => {
+            const active = k === i;
+            return `<span style="width:${active ? "16px" : "6px"}; height:6px; border-radius:999px; background: rgba(255,255,255,${active ? "0.95" : "0.55"}); border:1px solid rgba(0,0,0,0.10);"></span>`;
+          })
+          .join("");
+      }
+
+      // prev/next visibility
+      if (prevBtn) prevBtn.style.display = imgs.length > 1 ? "flex" : "none";
+      if (nextBtn) nextBtn.style.display = imgs.length > 1 ? "flex" : "none";
+    };
+
+    const go = (delta) => {
+      if (imgs.length <= 1) return;
+      state.idx = (state.idx + delta + imgs.length) % imgs.length;
+      render();
+    };
+
+    // bind buttons (remove previous by cloning)
+    if (prevBtn) {
+      const p = prevBtn.cloneNode(true);
+      prevBtn.parentNode.replaceChild(p, prevBtn);
+      p.addEventListener("click", () => go(-1));
+    }
+    if (nextBtn) {
+      const n = nextBtn.cloneNode(true);
+      nextBtn.parentNode.replaceChild(n, nextBtn);
+      n.addEventListener("click", () => go(1));
+    }
+
+    // swipe on mobile
+    const carousel = modal.querySelector(".toyod-carousel");
+    if (carousel) {
+      let x0 = null;
+      carousel.ontouchstart = (e) => {
+        x0 = e.touches?.[0]?.clientX ?? null;
+      };
+      carousel.ontouchend = (e) => {
+        if (x0 == null) return;
+        const x1 = e.changedTouches?.[0]?.clientX ?? null;
+        if (x1 == null) return;
+        const dx = x1 - x0;
+        if (Math.abs(dx) > 40) {
+          go(dx > 0 ? -1 : 1);
+        }
+        x0 = null;
+      };
+    }
+
+    render();
     modal.style.display = "flex";
   };
 
@@ -344,6 +407,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!modal) return;
     modal.style.display = "none";
   };
+
+
 
   // ====== Top Icons（同時支援：icon* / btnCart btnSearch btnMember） ======
   const ensureCartBadgeOnButton = (btn) => {
