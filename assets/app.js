@@ -49,6 +49,8 @@ document.addEventListener("DOMContentLoaded", () => {
   let ALL_PRODUCTS = [];
   let DISCOUNT = [];
   let CURRENT_CATEGORY = "全部";
+  let CURRENT_PAGE = "home";
+  let CURRENT_SUBSET = [];
 
   // ====== 小工具 ======
   const $ = (sel, root = document) => root.querySelector(sel);
@@ -61,7 +63,7 @@ document.addEventListener("DOMContentLoaded", () => {
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#039;");
 
-  const cssEscape = (s) => (window.CSS && cssEscape) ? cssEscape(String(s)) : String(s).replace(/[^a-zA-Z0-9_\-]/g, (c)=>`\\${c}`);
+    const cssEscape = (s) => (window.CSS && window.CSS.escape) ? window.CSS.escape(String(s)) : String(s).replace(/[^a-zA-Z0-9_\-]/g, (c)=>`\${c}`);
 
   const ntd = (n) => {
     const num = Number(n);
@@ -244,12 +246,25 @@ document.addEventListener("DOMContentLoaded", () => {
     return modal;
   };
 
+  const normalizeImageUrl = (u) => {
+    let s = String(u || "").trim();
+    if (!s) return "";
+    // upgrade http to https (GitHub Pages blocks mixed content)
+    if (s.startsWith("http://")) s = "https://" + s.slice(7);
+    // Google Drive share -> direct view
+    const m1 = s.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/);
+    if (m1) return `https://drive.google.com/uc?export=view&id=${m1[1]}`;
+    const m2 = s.match(/drive\.google\.com\/open\?id=([a-zA-Z0-9_-]+)/);
+    if (m2) return `https://drive.google.com/uc?export=view&id=${m2[1]}`;
+    return s;
+  };
+
   const normalizeImages = (images) => {
     if (!images) return [];
-    if (Array.isArray(images)) return images.filter(Boolean).map(String);
+    if (Array.isArray(images)) return images.filter(Boolean).map(normalizeImageUrl).filter(Boolean);
     if (typeof images === "string") {
       const parts = images.split(/[,|]/g).map((s) => s.trim()).filter(Boolean);
-      return parts.length ? parts : [images];
+      return (parts.length ? parts : [images]).map(normalizeImageUrl).filter(Boolean);
     }
     return [];
   };
@@ -348,9 +363,8 @@ document.addEventListener("DOMContentLoaded", () => {
         if (kw == null) return;
         const k = kw.trim();
         if (!k) return;
-        renderProducts(
-          ALL_PRODUCTS.filter((p) => String(p.name || "").includes(k))
-        );
+        const base = CURRENT_SUBSET.length ? CURRENT_SUBSET : ALL_PRODUCTS;
+        renderProducts(base.filter((p) => String(p.name || "").includes(k)));
         scrollToProducts();
       });
     }
@@ -547,13 +561,20 @@ document.addEventListener("DOMContentLoaded", () => {
   // ====== Products ======
   const uniq = (arr) => Array.from(new Set(arr));
 
+  const CATEGORY_ORDER = ["全部","項鍊","手鏈","耳環","戒指","其他"];
+  const normalizeCategory = (c) => {
+    const s = String(c || "").trim();
+    if (!s) return "其他";
+    if (CATEGORY_ORDER.includes(s)) return s;
+    return "其他";
+  };
+
   const buildCategoryPills = (products) => {
     const bar = document.getElementById(IDS.categoryBar);
     if (!bar) return;
 
-    const cats = uniq(
-      ["全部", ...products.map((p) => String(p.category || "").trim()).filter(Boolean)]
-    );
+        const present = products.map((p)=> normalizeCategory(p.category)).filter(Boolean);
+    const cats = CATEGORY_ORDER.filter((c)=> c==="全部" || present.includes(c));
 
     bar.innerHTML = cats
       .map((c) => {
@@ -582,9 +603,9 @@ document.addEventListener("DOMContentLoaded", () => {
         CURRENT_CATEGORY = btn.dataset.cat || "全部";
         const filtered =
           CURRENT_CATEGORY === "全部"
-            ? ALL_PRODUCTS
-            : ALL_PRODUCTS.filter((p) => String(p.category || "") === CURRENT_CATEGORY);
-        buildCategoryPills(ALL_PRODUCTS);
+            ? products
+            : products.filter((p) => normalizeCategory(p.category) === CURRENT_CATEGORY);
+        buildCategoryPills(products);
         renderProducts(filtered);
         scrollToProducts();
       });
@@ -604,7 +625,7 @@ document.addEventListener("DOMContentLoaded", () => {
       .map((p) => {
         const name = escapeHtml(p.name || "");
         const id = escapeHtml(p.id || "");
-        const category = escapeHtml(p.category || "");
+        const category = escapeHtml(normalizeCategory(p.category));
         const collection = escapeHtml(p.collection || "");
         const status = String(p.status || "").trim();
         const price = Number(p.price) || 0;
@@ -700,7 +721,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     // qty helpers (避免 cssEscape 相容問題：用 attribute selector 不做 escape)
-    const getQtyInput = (key) => $(`[data-qty-input="${escapeHtml(key)}"]`, grid);
+    const getQtyInput = (key) => $(`[data-qty-input="${cssEscape(key)}"]`, grid);
 
     $$("[data-qty-inc]", grid).forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -740,7 +761,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const qty = qtyInp ? Number(String(qtyInp.value).replace(/[^\d]/g, "")) || 1 : 1;
 
         let styleName = "";
-        const sel = $(`[data-style-select="${escapeHtml(key)}"]`, grid);
+        const sel = $(`[data-style-select="${cssEscape(key)}"]`, grid);
         if (sel) styleName = sel.value || "";
 
         addToCart(product, styleName, qty);
@@ -800,14 +821,16 @@ document.addEventListener("DOMContentLoaded", () => {
       console.log("API 回來的資料", data);
 
       ALL_PRODUCTS = Array.isArray(data.products) ? data.products : [];
+      // normalize categories to the fixed set (others -> 其他)
+      ALL_PRODUCTS = ALL_PRODUCTS.map((p)=> ({...p, category: normalizeCategory(p.category)}));
       const notice = Array.isArray(data.notice) ? data.notice : [];
       DISCOUNT = Array.isArray(data.discount) ? data.discount : [];
       window.DISCOUNT = DISCOUNT;
 
-      buildCategoryPills(ALL_PRODUCTS);
-      renderProducts(ALL_PRODUCTS);
       renderNotice(notice);
       updateCartBadge();
+      // re-apply current page after data loaded
+      applyPage(CURRENT_PAGE, {skipScroll:true});
     } catch (err) {
       console.error("API 錯誤", err);
       const wrap = document.getElementById(IDS.noticeWrap);
@@ -832,7 +855,9 @@ document.addEventListener("DOMContentLoaded", () => {
     return h || "home";
   };
 
-  const applyPage = (page) => {
+  const applyPage = (page, opts = {}) => {
+    CURRENT_PAGE = page;
+
     // show/hide pages
     $$("[data-page]").forEach((sec) => {
       const p = sec.getAttribute("data-page");
@@ -859,20 +884,28 @@ document.addEventListener("DOMContentLoaded", () => {
 
       CURRENT_CATEGORY = "全部";
 
-      const subset =
+            const subset =
         page === "silver"
-          ? ALL_PRODUCTS.filter((p) => String(p.collection || "").includes("純銀"))
+          ? ALL_PRODUCTS.filter((p) => {
+              const col = String(p.collection || "");
+              const silverFlag = String(p.silver || p.isSilver || "").toLowerCase();
+              return col.includes("純銀") || silverFlag === "true" || silverFlag === "1" || silverFlag === "yes";
+            })
           : ALL_PRODUCTS;
+
+      CURRENT_SUBSET = subset;
 
       buildCategoryPills(subset);
 
       const filtered =
         CURRENT_CATEGORY === "全部"
           ? subset
-          : subset.filter((p) => String(p.category || "") === CURRENT_CATEGORY);
+          : subset.filter((p) => normalizeCategory(p.category) === CURRENT_CATEGORY);
 
       renderProducts(filtered);
-      scrollToProducts();
+      if (!opts.skipScroll) scrollToProducts();
+    } else {
+      CURRENT_SUBSET = [];
     }
   };
 

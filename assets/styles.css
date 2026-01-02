@@ -93,11 +93,11 @@ button{ cursor:pointer; }
   min-width: 180px;
 }
 .brand .title{
-  font-size: 25px;        /* 主標 28 */
-  line-height: 1.15;
-  font-weight: 500;
+  font-size:28px;
+  line-height:1;
+  font-weight:500;
   letter-spacing: .08em;
-  color: rgba(47,59,51,.85);
+  color:rgba(47,59,51,.85);
   font-family: "DFKai-SB","BiauKai","KaiTi","Noto Serif TC",serif;
 }
 .brand .dash{
@@ -142,8 +142,8 @@ button{ cursor:pointer; }
   filter: blur(.35px);
 }
 .brand .handle{
-  font-size: 15px;      /* 副標 15–16 */
-  font-style: italic;     /* ★ 斜體在這 */
+  font-size:16px;
+  font-style: italic;
   letter-spacing: .06em;
   color: var(--muted);
 }
@@ -737,20 +737,42 @@ body{ margin:0; }
   .footerRow{flex-wrap:wrap; gap:10px;}
   .footerItem{flex:1 1 100%; text-align:center;}
 }
-@media (max-width: 768px){
-  .brand .title{
-    font-size: 25px;
-  }
-  .brand .handle{
-    font-size: 15px;
-    font-style: italic;
-  }
-html, body{
-  padding-bottom: calc(18px + env(safe-area-inset-bottom));
+
+
+
+/* ====== FIX: Top icons like Canva (consistent SVG sizing) ====== */
+.topIcons .iconBtn{
+  display:grid;
+  place-items:center;
 }
-@media (max-width: 768px){
-  .footer{
-    font-size: 14px;
-    line-height: 1.6;
+.topIcons .iconBtn .iconSvg{
+  width:18px;
+  height:18px;
+  opacity:.88;
+  color: rgba(32,45,35,.78);
+}
+@media (max-width: 520px){
+  .topIcons{ gap:8px; }
+  .topIcons .iconBtn{ width:36px; height:36px; }
+  .topIcons .iconBtn .iconSvg{ width:18px; height:18px; }
+}
+
+/* ====== FIX: Footer mobile safe area + avoid text covering ====== */
+.footer{
+  padding-bottom: calc(26px + env(safe-area-inset-bottom));
+}
+.footerTop{
+  gap:10px;
+}
+@media (max-width: 520px){
+  .footerTop{
+    grid-template-columns: 1fr;
+  }
+  .footerFeature{
+    text-align:center;
+  }
+  .footerLinks{
+    line-height:1.6;
+    padding: 0 10px;
   }
 }
