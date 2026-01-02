@@ -1,64 +1,79 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>十年一日 TEN YEARS ONE DAY</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@300;400;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css" />
+
+  <link rel="stylesheet" href="assets/styles.css" />
 </head>
 <body>
+  <div class="header">
+    <div class="container">
+      <div class="brandRow">
+        <div class="brand">
+          <div class="title">十年一日</div>
+          <div class="dash" aria-hidden="true"></div>
+          <div class="handle">tenyears_oneday</div>
+        </div>
 
-<header class="topbar">
-  <div class="brand">
-    <h1>十年一日</h1>
-    <div class="dashed"></div>
-    <div class="brand-sub">tenyears_oneday</div>
+        <div class="topIcons">
+          <a class="iconBtn" href="https://www.instagram.com/tenyears_oneday?igsh=MW9hcjBnaTdjNzc0MQ%3D%3D&utm_source=qr" target="_blank" rel="noopener" title="Instagram">
+            <img src="assets/icons/ig.svg" alt="IG" style="width:18px;height:18px;opacity:.85">
+          </a>
+          <a class="iconBtn" href="https://line.me/R/ti/p/@396kwrga" target="_blank" rel="noopener" title="LINE">
+            <img src="assets/icons/line.svg" alt="LINE" style="width:18px;height:18px;opacity:.85">
+          </a>
+
+          <button class="iconBtn" id="btnSearch" title="搜尋">
+            <img src="assets/icons/search.svg" alt="Search" style="width:18px;height:18px;opacity:.85">
+          </button>
+
+          <a class="iconBtn" href="#cart" id="btnCart" title="購物車">
+            <img src="assets/icons/cart.svg" alt="Cart" style="width:18px;height:18px;opacity:.85">
+          </a>
+
+          <a class="iconBtn" href="#member" id="btnMember" title="會員">
+            <img src="assets/icons/user.svg" alt="User" style="width:18px;height:18px;opacity:.85">
+          </a>
+        </div>
+      </div>
+
+      <div class="navWrap">
+        <nav class="nav" id="nav">
+          <a class="pill" data-route="#home" href="#home">關於我們</a>
+          <a class="pill" data-route="#all" href="#all">全系列🌸</a>
+          <a class="pill" data-route="#silver" href="#silver">純銀飾品✨</a>
+          <a class="pill" data-route="#promo" href="#promo">優惠活動🎁</a>
+          <a class="pill" data-route="#knowledge" href="#knowledge">飾品小知識💡</a>
+          <a class="pill" data-route="#faq" href="#faq">相關問題❗️</a>
+        </nav>
+      </div>
+
+      <div class="sectionIntro" id="subhead">
+        <span id="subheadText">關於我們（首頁）</span>
+      </div>
+
+    </div>
   </div>
 
-  <nav class="nav">
-    <a class="active">關於我們</a>
-    <a>全系列🌸</a>
-    <a>純銀飾品✨</a>
-    <a>優惠活動🎁</a>
-    <a>飾品小知識💡</a>
-    <a>相關問題❗</a>
-  </nav>
+  <main class="container" id="app" aria-live="polite"></main>
 
-  <div class="icons">
-    <a href="https://www.instagram.com/tenyears_oneday" target="_blank">IG</a>
-    <a href="https://line.me/R/ti/p/@396kwrga" target="_blank">LINE</a>
-    <span>🔍</span>
-    <span>🛒</span>
-    <span>👤</span>
-  </div>
-</header>
+  <div class="container" style="padding-top: 0;">
+    <footer class="footerBar">
+  <div class="footerInner">
+    <div class="footerGrid">
+      <div class="footerItem">💎 精選材質 不含鉛，安心佩戴</div>
+      <div class="footerItem">✨ 獨特設計 韓日歐美風格齊聚</div>
+      <div class="footerItem">🚚 便利配送 超商取貨、宅配到府</div>
+    </div>
 
-<section class="hero">
-  <h2>十年一日</h2>
-  <p class="hero-sub">時光淬鍊 · 破碎中尋覓永恆</p>
-  <p>每一件飾品，都是時間的詩篇</p>
-</section>
-
-<section class="intro-full">
-  <div class="intro-card">
-    <h3>🤍 歡迎來到 十年一日</h3>
-    <div class="en">TEN YEARS ONE DAY</div>
-    <div class="italic">Every piece tells a story.</div>
-
-    <p>承載著十年以上的友情，<br>繼續延續下去的動力。</p>
-    <p>每一件飾品，<br>都是時間累積的溫柔。</p>
-
-    <p class="thanks">謝謝你，把重要的一天交給十年一日 ✨</p>
-  </div>
-</section>
-
-<footer class="footer">
-  <div class="footer-items">
-    <div>💎 精選材質 不含鉛，安心佩戴</div>
-    <div>✨ 獨特設計 韓日歐美風格齊聚</div>
-    <div>🚚 便利配送 超商取貨、宅配到府</div>
+    <div class="footerDivider"></div>
 
     <div class="footerBrand">
       <div class="footerTitle">十年一日</div>
@@ -72,5 +87,32 @@
   </div>
 </footer>
 
+<!-- Modal: Search -->
+  <div class="modalOverlay" id="searchModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="searchTitle">
+      <div class="modalHead">
+        <h3 id="searchTitle">搜尋商品</h3>
+        <button class="closeX" id="closeSearch" aria-label="關閉">✕</button>
+      </div>
+      <div class="modalBody">
+        <input class="input" id="searchInput" placeholder="輸入關鍵字（商品名 / 分類 / 描述）" />
+        <div style="height:12px"></div>
+        <div id="searchResults" class="products"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Image -->
+  <div class="modalOverlay" id="imgModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="imgTitle">
+      <div class="modalHead">
+        <h3 id="imgTitle">商品圖片</h3>
+        <button class="closeX" id="closeImg" aria-label="關閉">✕</button>
+      </div>
+      <div class="modalBody" id="imgBody"></div>
+    </div>
+  </div>
+
+  <script src="assets/app.js"></script>
 </body>
 </html>
