@@ -93,11 +93,11 @@ button{ cursor:pointer; }
   min-width: 180px;
 }
 .brand .title{
-  font-size:35px;
-  line-height:1;
-  font-weight:500;
+  font-size: 28px;        /* 主標 28 */
+  line-height: 1.15;
+  font-weight: 500;
   letter-spacing: .08em;
-  color:rgba(47,59,51,.85);
+  color: rgba(47,59,51,.85);
   font-family: "DFKai-SB","BiauKai","KaiTi","Noto Serif TC",serif;
 }
 .brand .dash{
@@ -142,8 +142,8 @@ button{ cursor:pointer; }
   filter: blur(.35px);
 }
 .brand .handle{
-  font-size:16px;
-  font-style: italic;
+  font-size: 15.5px;      /* 副標 15–16 */
+  font-style: italic;     /* ★ 斜體在這 */
   letter-spacing: .06em;
   color: var(--muted);
 }
