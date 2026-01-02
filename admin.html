@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>後台管理｜十年一日</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@300;400;600&display=swap" rel="stylesheet">
+  <style>
+    body{ margin:0; font-family:"Noto Serif TC",serif; background: linear-gradient(#F8F9F7,#D4E7D1,#A8BCA5,#B8C9A8); min-height:100vh; }
+    .wrap{ max-width: 720px; margin: 40px auto; padding: 0 18px; }
+    .card{ background: rgba(255,255,255,0.65); border:1px solid rgba(0,0,0,0.08); border-radius: 20px; padding: 18px; box-shadow: 0 22px 60px rgba(0,0,0,0.08); }
+    h1{ margin:0 0 10px; font-size: 18px; opacity:.82; }
+    .row{ display:flex; gap:10px; margin-top: 10px; flex-wrap:wrap; }
+    input{ flex:1; min-width: 220px; padding: 10px 12px; border-radius: 14px; border:1px solid rgba(0,0,0,0.12); background: rgba(255,255,255,0.65); }
+    button{ padding: 10px 14px; border-radius: 14px; border:0; background: rgba(34,52,40,0.88); color:#fff; cursor:pointer; }
+    .hint{ font-size:12px; opacity:.65; margin-top: 8px; line-height:1.7; }
+    .ok{ margin-top: 14px; display:none; }
+    .ok a{ color: rgba(34,52,40,0.92); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>後台管理（示範版）</h1>
+      <div class="hint">這個版本先做「登入/登出」入口，後續要做完整「商品/會員/訂單」管理時，我可以再幫你把 Google Sheet 的新增/刪除/更新接起來。</div>
+
+      <div class="row">
+        <input id="u" placeholder="帳號" autocomplete="username">
+        <input id="p" placeholder="密碼" type="password" autocomplete="current-password">
+        <button id="login">登入</button>
+        <button id="logout" style="display:none;background:rgba(0,0,0,0.25);color:#222;">登出</button>
+      </div>
+
+      <div class="ok" id="ok">
+        <div class="hint">✅ 已登入。你現在可以回到首頁繼續操作。</div>
+        <div class="hint"><a href="index.html#home">回首頁</a></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const KEY="tenyears_oneday_admin";
+  const USER="tenyears_oneday";
+  const PASS="09110321";
+  const ok=document.getElementById("ok");
+  const login=document.getElementById("login");
+  const logout=document.getElementById("logout");
+  const sync=()=>{
+    const is=localStorage.getItem(KEY)==="1";
+    ok.style.display=is?"block":"none";
+    logout.style.display=is?"inline-block":"none";
+    login.style.display=is?"none":"inline-block";
+  };
+  login.onclick=()=>{
+    const u=document.getElementById("u").value.trim();
+    const p=document.getElementById("p").value.trim();
+    if(u===USER && p===PASS){ localStorage.setItem(KEY,"1"); sync(); }
+    else alert("帳號或密碼錯誤");
+  };
+  logout.onclick=()=>{ localStorage.removeItem(KEY); sync(); };
+  sync();
+</script>
+</body>
+</html>
