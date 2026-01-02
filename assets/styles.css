@@ -737,3 +737,12 @@ body{ margin:0; }
   .footerRow{flex-wrap:wrap; gap:10px;}
   .footerItem{flex:1 1 100%; text-align:center;}
 }
+@media (max-width: 768px){
+  .brand .title{
+    font-size: 28px;
+  }
+  .brand .handle{
+    font-size: 15.5px;
+    font-style: italic;
+  }
+}
