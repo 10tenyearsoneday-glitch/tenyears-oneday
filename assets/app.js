@@ -1,58 +1,15 @@
 /* =========================================================
-   TENYEARS_ONEDAY - app.js (B2 GAS + Cart + Products)
-   - 讀取 Google Apps Script JSON (products / notice / discount)
-   - 產品列表：分類篩選、圖片放大 modal、加入購物車、數量調整
-   - 公告：顯示 active 的公告
-   - 購物車：側邊抽屜、繼續購物、結帳摘要
+   TENYEARS_ONEDAY - Products Page app.js (D FIX)
+   - Fetch products from Google Apps Script JSON
+   - Render category pills + product cards
+   - Image modal supports multiple images + next/prev
+   - Safe guards: no null crashes
    ========================================================= */
 
 document.addEventListener("DOMContentLoaded", () => {
-  // ====== 基本設定 ======
-  const STORE_KEY = "tenyears_oneday_cart_v1";
+  const API_URL = "https://script.google.com/macros/s/AKfycbzTQDS9uZ67YPC3yu9B71Ba3WLwe6_4cL3tTe2ZhBcqi_SIjSbEqEbpB6pd2JpVg-hM/exec";
 
-  // 外部連結
-  const IG_URL =
-    "https://www.instagram.com/tenyears_oneday?igsh=MW9hcjBnaTdjNzc0MQ%3D%3D&utm_source=qr";
-  const LINE_URL = "https://line.me/R/ti/p/@396kwrga";
-
-  // GAS Web App
-  const API_URL =
-    "https://script.google.com/macros/s/AKfycbzTQDS9uZ67YPC3yu9B71Ba3WLwe6_4cL3tTe2ZhBcqi_SIjSbEqEbpB6pd2JpVg-hM/exec";
-
-  // ====== DOM IDs ======
-  const IDS = {
-    productsWrap: "productsWrap",
-    productsGrid: "productsGrid",
-    noticeWrap: "noticeWrap",
-    categoryBar: "categoryBar",
-
-    cartDrawer: "cartDrawer",
-    cartItems: "cartItems",
-    cartCount: "cartCount",
-    cartSubtotal: "cartSubtotal",
-    cartCheckoutBtn: "cartCheckoutBtn",
-
-    // icons (如果你的 HTML 沒有這些 id，不影響；我們也會綁 btnCart / btnSearch / btnMember)
-    iconIG: "iconIG",
-    iconLINE: "iconLINE",
-    iconCart: "iconCart",
-    iconSearch: "iconSearch",
-    iconMember: "iconMember",
-
-    imgModal: "imgModal",
-    imgTitle: "imgTitle",
-    imgBody: "imgBody",
-    closeImg: "closeImg",
-  };
-
-  // ====== 全域狀態 ======
-  let ALL_PRODUCTS = [];
-  let DISCOUNT = [];
-  let CURRENT_CATEGORY = "全部";
-  let CURRENT_PAGE = "home";
-  let CURRENT_SUBSET = [];
-
-  // ====== 小工具 ======
+  // --- helpers ---
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const escapeHtml = (s) =>
@@ -63,735 +20,331 @@ document.addEventListener("DOMContentLoaded", () => {
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#039;");
 
-    const cssEscape = (s) => (window.CSS && window.CSS.escape) ? window.CSS.escape(String(s)) : String(s).replace(/[^a-zA-Z0-9_\-]/g, (c)=>`\${c}`);
-
   const ntd = (n) => {
     const num = Number(n);
-    if (!Number.isFinite(num)) return "";
-    return num.toLocaleString("zh-TW");
+    return Number.isFinite(num) ? num.toLocaleString("zh-TW") : "";
   };
 
-  // 圖片載入失敗的替代圖（SVG Data URI）
-  const IMG_FALLBACK =
-    "data:image/svg+xml;charset=UTF-8," +
-    encodeURIComponent(
-      `<svg xmlns='http://www.w3.org/2000/svg' width='800' height='500'>
-        <rect width='100%' height='100%' fill='#eef4ee'/>
-        <rect x='24' y='24' width='752' height='452' rx='22' fill='#ffffff' fill-opacity='0.75' stroke='#c9d6c9'/>
-        <text x='50%' y='48%' dominant-baseline='middle' text-anchor='middle' font-family='Arial, sans-serif' font-size='22' fill='#6f7f73'>圖片暫時無法顯示</text>
-        <text x='50%' y='56%' dominant-baseline='middle' text-anchor='middle' font-family='Arial, sans-serif' font-size='14' fill='#6f7f73' fill-opacity='0.85'>請更新圖片網址（Google Sheet 的 images 欄位）</text>
-      </svg>`
-    );
-
-  const ensureEl = (id, tag = "div", parent = document.body, opts = {}) => {
-    let el = document.getElementById(id);
-    if (el) return el;
-    el = document.createElement(tag);
-    el.id = id;
-    if (opts.className) el.className = opts.className;
-    if (opts.style) el.setAttribute("style", opts.style);
-    parent.appendChild(el);
-    return el;
-  };
-
-  // ====== 版面容器（若 HTML 沒有，就自動補上；不會蓋住你的原本設計） ======
-  const ensureMainLayoutIfMissing = () => {
-    const main = $("main") || $(".container") || $(".wrap") || document.body;
-
-    const hero = $(".hero") || $(".home-hero") || $(".card") || main;
-
-    // 公告容器（在 hero 下方）
-    ensureEl(IDS.noticeWrap, "div", hero, {
-      className: "notice-wrap",
-      style: "margin: 14px auto 0; max-width: 1100px; padding: 0 18px;",
-    });
-
-    // 商品容器（在 main 下面）
-    const productsWrap = ensureEl(IDS.productsWrap, "section", main, {
-      className: "products-wrap",
-      style: "margin: 22px auto; max-width: 1100px; padding: 0 18px;",
-    });
-
-    ensureEl(IDS.categoryBar, "div", productsWrap, {
-      className: "category-bar",
-      style:
-        "display:flex; gap:10px; flex-wrap:nowrap; overflow:auto; padding:10px 2px 14px; -webkit-overflow-scrolling:touch;",
-    });
-
-    ensureEl(IDS.productsGrid, "div", productsWrap, {
-      className: "products-grid",
-      style:
-        "display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:14px; padding-bottom: 16px;",
-    });
-
-    ensureCartDrawer();
-    ensureImgModal();
-  };
-
-  // ====== 購物車抽屜（避免蓋住頁面：關閉時 pointer-events:none） ======
-  const ensureCartDrawer = () => {
-    let drawer = document.getElementById(IDS.cartDrawer);
-    if (drawer) return drawer;
-
-    drawer = document.createElement("div");
-    drawer.id = IDS.cartDrawer;
-    drawer.setAttribute(
-      "style",
-      [
-        "position:fixed",
-        "top:0",
-        "right:0",
-        "height:100vh",
-        "width:min(420px, 92vw)",
-        "background:rgba(255,255,255,0.95)",
-        "backdrop-filter: blur(10px)",
-        "border-left:1px solid rgba(0,0,0,0.08)",
-        "transform: translateX(110%)",
-        "transition: transform .25s ease",
-        "z-index:9999",
-        "display:flex",
-        "flex-direction:column",
-        "pointer-events:none",
-      ].join(";")
-    );
-
-    drawer.innerHTML = `
-      <div style="padding:16px 16px 10px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
-        <div style="font-weight:600; letter-spacing:.02em;">購物車</div>
-        <button id="cartCloseBtn" style="border:0; background:transparent; font-size:20px; cursor:pointer;">×</button>
-      </div>
-
-      <div id="${IDS.cartItems}" style="padding: 0 16px 16px; overflow:auto; flex: 1;"></div>
-
-      <div style="padding: 12px 16px 16px; border-top:1px solid rgba(0,0,0,0.08);">
-        <div style="display:flex; justify-content:space-between; margin-bottom:10px; font-size:14px;">
-          <div>小計</div>
-          <div><span>NT$</span><span id="${IDS.cartSubtotal}">0</span></div>
-        </div>
-
-        <div style="display:flex; gap:10px;">
-          <button id="cartContinueBtn"
-            style="flex:1; padding:10px 12px; border-radius:12px; border:1px solid rgba(0,0,0,0.15); background:transparent; cursor:pointer;">
-            繼續購物
-          </button>
-          <button id="${IDS.cartCheckoutBtn}"
-            style="flex:1; padding:10px 12px; border-radius:12px; border:0; background:rgba(34,52,40,.88); color:#fff; cursor:pointer;">
-            前往結帳
-          </button>
-        </div>
-
-        <div style="margin-top:10px; font-size:12px; opacity:.7;">
-          登入會員（待接會員功能）
-        </div>
-      </div>
-    `;
-
-    document.body.appendChild(drawer);
-
-    $("#cartCloseBtn").addEventListener("click", closeCart);
-    $("#cartContinueBtn").addEventListener("click", closeCart);
-
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") {
-        closeCart();
-        closeImgModal();
-      }
-    });
-
-    document.getElementById(IDS.cartCheckoutBtn).addEventListener("click", () => {
-      alert("結帳流程（可接 Stripe / 或你的結帳頁）");
-    });
-
-    return drawer;
-  };
-
-  // ====== 圖片 Modal ======
-    const ensureImgModal = () => {
-    let modal = document.getElementById(IDS.imgModal);
-    if (modal) return modal;
-
-    modal = document.createElement("div");
-    modal.id = IDS.imgModal;
-    modal.className = "toyod-modal";
-    modal.setAttribute(
-      "style",
-      [
-        "position:fixed",
-        "inset:0",
-        "background: rgba(0,0,0,0.35)",
-        "display:none",
-        "align-items:center",
-        "justify-content:center",
-        "z-index:9998",
-        "padding: 18px",
-      ].join(";")
-    );
-
-    modal.innerHTML = `
-      <div class="toyod-modalCard" style="width:min(920px, 96vw); max-height: 90vh; overflow:auto; background:rgba(255,255,255,0.92); border-radius:18px; border:1px solid rgba(0,0,0,0.10); box-shadow: 0 22px 60px rgba(0,0,0,0.20);">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding: 14px 16px; border-bottom: 1px solid rgba(0,0,0,0.08);">
-          <h3 data-img-title style="margin:0; font-size:15px; font-weight:600;">商品圖片</h3>
-          <button data-img-close style="border:0; background:transparent; font-size:20px; cursor:pointer;">×</button>
-        </div>
-
-        <div style="padding: 14px 16px;">
-          <div class="toyod-carousel" style="position:relative; border-radius:16px; overflow:hidden; border:1px solid rgba(0,0,0,0.08); background:#fff;">
-            <button data-img-prev aria-label="上一張"
-              style="position:absolute; left:10px; top:50%; transform:translateY(-50%); width:38px; height:38px; border-radius:999px; border:1px solid rgba(0,0,0,0.12); background:rgba(255,255,255,0.75); cursor:pointer; display:flex; align-items:center; justify-content:center;">
-              ‹
-            </button>
-
-            <a data-img-link target="_blank" rel="noreferrer"
-               style="display:block; width:100%; height:min(60vh, 520px); background:rgba(0,0,0,0.03);">
-              <img data-img-main alt=""
-                   style="width:100%; height:100%; object-fit:contain; display:block;">
-            </a>
-
-            <button data-img-next aria-label="下一張"
-              style="position:absolute; right:10px; top:50%; transform:translateY(-50%); width:38px; height:38px; border-radius:999px; border:1px solid rgba(0,0,0,0.12); background:rgba(255,255,255,0.75); cursor:pointer; display:flex; align-items:center; justify-content:center;">
-              ›
-            </button>
-
-            <div data-img-dots
-                 style="position:absolute; left:0; right:0; bottom:10px; display:flex; justify-content:center; gap:6px; pointer-events:none;">
-            </div>
-          </div>
-
-          <div data-img-thumbs style="margin-top:10px; display:flex; gap:10px; overflow:auto; padding:4px 2px; -webkit-overflow-scrolling:touch;"></div>
-          <div data-img-desc style="margin-top:12px; font-size:13px; line-height:1.75; opacity:.85; white-space:pre-wrap;"></div>
-        </div>
-      </div>
-    `;
-
-    document.body.appendChild(modal);
-
-    // Close
-    modal.querySelector("[data-img-close]")?.addEventListener("click", closeImgModal);
-    modal.addEventListener("click", (e) => {
-      if (e.target === modal) closeImgModal();
-    });
-
-    // ESC
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") closeImgModal();
-    });
-
-    return modal;
-  };
-
-  const openImgModal = (product) => {
-    const modal = ensureImgModal();
-
-    const titleEl = modal.querySelector("[data-img-title]");
-    const mainImg = modal.querySelector("[data-img-main]");
-    const linkEl = modal.querySelector("[data-img-link]");
-    const thumbsEl = modal.querySelector("[data-img-thumbs]");
-    const descEl = modal.querySelector("[data-img-desc]");
-    const dotsEl = modal.querySelector("[data-img-dots]");
-    const prevBtn = modal.querySelector("[data-img-prev]");
-    const nextBtn = modal.querySelector("[data-img-next]");
-
-    const imgs = normalizeImages(product?.images);
-    const desc = escapeHtml(product?.description || "");
-    const titleText = product?.name ? `商品圖片｜${product.name}` : "商品圖片";
-
-    if (titleEl) titleEl.textContent = titleText;
-    if (descEl) descEl.innerHTML = desc ? desc : "";
-
-    // 沒圖片就給一個空狀態
-    if (!imgs.length) {
-      if (mainImg) mainImg.removeAttribute("src");
-      if (linkEl) linkEl.removeAttribute("href");
-      if (thumbsEl) thumbsEl.innerHTML = `<div style="font-size:12px; opacity:.7;">沒有圖片</div>`;
-      if (dotsEl) dotsEl.innerHTML = "";
-      if (prevBtn) prevBtn.style.display = "none";
-      if (nextBtn) nextBtn.style.display = "none";
-      modal.style.display = "flex";
-      return;
+  const normalizeImages = (images) => {
+    if (!images) return [];
+    if (Array.isArray(images)) return images.filter(Boolean).map(String);
+    if (typeof images === "string") {
+      const parts = images
+        .split(/[,|\n]/g)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      return parts.length ? parts : [images.trim()];
     }
+    return [];
+  };
 
-    // state
-    const state = {
-      imgs,
-      idx: 0,
-    };
-    modal.__toyod_state = state;
+  const normalizeStyles = (styles) => {
+    if (!styles) return [];
+    if (Array.isArray(styles)) return styles.filter(Boolean).map(String);
+    if (typeof styles === "string") {
+      return styles
+        .split(/\n|,|、/g)
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+    return [];
+  };
 
-    const render = () => {
-      const i = state.idx;
-      const src = imgs[i];
+  // --- state ---
+  let ALL_PRODUCTS = [];
+  let CURRENT_CAT = "全部";
 
+  // --- elements (must exist in HTML) ---
+  const categoryBar = document.getElementById("categoryBar");
+  const productsGrid = document.getElementById("productsGrid");
+  const imgModal = document.getElementById("imgModal");
+
+  if (!productsGrid) {
+    console.warn("Missing #productsGrid in HTML");
+    return;
+  }
+
+  // --- modal (create inner) ---
+  const ensureModalInner = () => {
+    if (!imgModal) return null;
+
+    if (imgModal.dataset.ready === "1") return imgModal;
+
+    imgModal.style.display = "none";
+    imgModal.style.position = "fixed";
+    imgModal.style.inset = "0";
+    imgModal.style.zIndex = "9999";
+    imgModal.style.background = "rgba(0,0,0,0.45)";
+    imgModal.style.padding = "16px";
+    imgModal.style.alignItems = "center";
+    imgModal.style.justifyContent = "center";
+
+    imgModal.innerHTML = `
+      <div class="tym-modal" style="width:min(920px,96vw); max-height:90vh; overflow:auto;
+        border-radius:18px; background:rgba(255,255,255,0.95); border:1px solid rgba(0,0,0,0.10);
+        box-shadow:0 26px 70px rgba(0,0,0,0.28);">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;
+          padding:14px 16px; border-bottom:1px solid rgba(0,0,0,0.08);">
+          <div id="imgTitle" style="font-weight:700; font-size:14px;">商品圖片</div>
+          <button id="closeImg" style="border:0; background:transparent; font-size:22px; cursor:pointer;">×</button>
+        </div>
+
+        <div style="padding:14px 16px;">
+          <div style="display:grid; grid-template-columns: 1fr; gap:12px;">
+            <div style="position:relative;">
+              <button id="imgPrev" aria-label="上一張"
+                style="position:absolute; left:10px; top:50%; transform:translateY(-50%);
+                  width:40px; height:40px; border-radius:999px; border:0; cursor:pointer;
+                  background:rgba(255,255,255,0.75); backdrop-filter: blur(6px); display:none;">‹</button>
+              <button id="imgNext" aria-label="下一張"
+                style="position:absolute; right:10px; top:50%; transform:translateY(-50%);
+                  width:40px; height:40px; border-radius:999px; border:0; cursor:pointer;
+                  background:rgba(255,255,255,0.75); backdrop-filter: blur(6px); display:none;">›</button>
+
+              <a id="imgLink" href="#" target="_blank" rel="noreferrer"
+                style="display:block; border-radius:16px; overflow:hidden; border:1px solid rgba(0,0,0,0.10); background:#fff;">
+                <img id="imgMain" alt="" style="width:100%; height:min(56vh,520px); object-fit:cover; display:block;">
+              </a>
+            </div>
+
+            <div id="imgThumbs" style="display:flex; gap:10px; overflow:auto; padding-bottom:4px;"></div>
+
+            <div id="imgDesc" style="font-size:13px; line-height:1.8; opacity:.86; white-space:pre-wrap;"></div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    imgModal.dataset.ready = "1";
+    imgModal.style.display = "none";
+    imgModal.style.display = "flex"; // for alignment baseline
+    imgModal.style.display = "none";
+
+    // close
+    $("#closeImg", imgModal)?.addEventListener("click", closeModal);
+    imgModal.addEventListener("click", (e) => {
+      if (e.target === imgModal) closeModal();
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (imgModal.style.display !== "flex") return;
+      if (e.key === "Escape") closeModal();
+      if (e.key === "ArrowLeft") stepModal(-1);
+      if (e.key === "ArrowRight") stepModal(1);
+    });
+
+    return imgModal;
+  };
+
+  let modalImages = [];
+  let modalIndex = 0;
+
+  const renderModal = (product) => {
+    const modal = ensureModalInner();
+    if (!modal) return;
+
+    modalImages = normalizeImages(product?.images);
+    modalIndex = 0;
+
+    const titleEl = $("#imgTitle", modal);
+    const mainImg = $("#imgMain", modal);
+    const linkEl = $("#imgLink", modal);
+    const thumbs = $("#imgThumbs", modal);
+    const descEl = $("#imgDesc", modal);
+    const prevBtn = $("#imgPrev", modal);
+    const nextBtn = $("#imgNext", modal);
+
+    if (titleEl) titleEl.textContent = product?.name ? `商品圖片｜${product.name}` : "商品圖片";
+
+    const desc = String(product?.description ?? "").trim();
+    if (descEl) descEl.textContent = desc;
+
+    const setIndex = (idx) => {
+      if (!modalImages.length) return;
+      modalIndex = (idx + modalImages.length) % modalImages.length;
+      const src = modalImages[modalIndex];
       if (mainImg) mainImg.src = src;
       if (linkEl) linkEl.href = src;
 
-      // thumbs
-      if (thumbsEl) {
-        thumbsEl.innerHTML = imgs
-          .map((u, k) => {
-            const active = k === i;
-            return `
-              <button data-thumb="${k}"
-                style="flex:0 0 auto; width:68px; height:68px; border-radius:14px; overflow:hidden; border:1px solid rgba(0,0,0,${active ? "0.28" : "0.10"}); background:#fff; cursor:pointer; outline:${active ? "2px solid rgba(34,52,40,.55)" : "none"};">
-                <img src="${escapeHtml(u)}" alt="" style="width:100%; height:100%; object-fit:cover; display:block;">
-              </button>
-            `;
-          })
-          .join("");
-
-        thumbsEl.querySelectorAll("[data-thumb]").forEach((b) => {
-          b.addEventListener("click", () => {
-            state.idx = Number(b.dataset.thumb) || 0;
-            render();
-          });
+      // highlight thumb
+      if (thumbs) {
+        $$("button[data-idx]", thumbs).forEach((b) => {
+          b.style.outline = (Number(b.dataset.idx) === modalIndex) ? "2px solid rgba(34,52,40,0.85)" : "0";
+          b.style.outlineOffset = "2px";
         });
       }
+    };
 
-      // dots
-      if (dotsEl) {
-        dotsEl.innerHTML = imgs
-          .map((_, k) => {
-            const active = k === i;
-            return `<span style="width:${active ? "16px" : "6px"}; height:6px; border-radius:999px; background: rgba(255,255,255,${active ? "0.95" : "0.55"}); border:1px solid rgba(0,0,0,0.10);"></span>`;
-          })
-          .join("");
+    // thumbs
+    if (thumbs) {
+      thumbs.innerHTML = modalImages
+        .map((src, i) => `
+          <button data-idx="${i}" style="flex:0 0 auto; padding:0; border:0; background:transparent; cursor:pointer;">
+            <img src="${escapeHtml(src)}" alt=""
+              style="width:88px; height:64px; object-fit:cover; border-radius:12px; border:1px solid rgba(0,0,0,0.10); display:block;">
+          </button>
+        `)
+        .join("");
+
+      $$("button[data-idx]", thumbs).forEach((b) => {
+        b.addEventListener("click", () => setIndex(Number(b.dataset.idx) || 0));
+      });
+    }
+
+    const showNav = modalImages.length > 1;
+    if (prevBtn) prevBtn.style.display = showNav ? "inline-flex" : "none";
+    if (nextBtn) nextBtn.style.display = showNav ? "inline-flex" : "none";
+
+    prevBtn?.addEventListener("click", () => stepModal(-1));
+    nextBtn?.addEventListener("click", () => stepModal(1));
+
+    // placeholder if no images
+    if (!modalImages.length) {
+      if (mainImg) {
+        mainImg.removeAttribute("src");
+        mainImg.alt = "No image";
+        mainImg.style.objectFit = "contain";
+        mainImg.style.background = "rgba(0,0,0,0.06)";
       }
-
-      // prev/next visibility
-      if (prevBtn) prevBtn.style.display = imgs.length > 1 ? "flex" : "none";
-      if (nextBtn) nextBtn.style.display = imgs.length > 1 ? "flex" : "none";
-    };
-
-    const go = (delta) => {
-      if (imgs.length <= 1) return;
-      state.idx = (state.idx + delta + imgs.length) % imgs.length;
-      render();
-    };
-
-    // bind buttons (remove previous by cloning)
-    if (prevBtn) {
-      const p = prevBtn.cloneNode(true);
-      prevBtn.parentNode.replaceChild(p, prevBtn);
-      p.addEventListener("click", () => go(-1));
-    }
-    if (nextBtn) {
-      const n = nextBtn.cloneNode(true);
-      nextBtn.parentNode.replaceChild(n, nextBtn);
-      n.addEventListener("click", () => go(1));
+      if (linkEl) linkEl.href = "#";
+    } else {
+      if (mainImg) {
+        mainImg.style.objectFit = "cover";
+        mainImg.style.background = "#fff";
+      }
+      setIndex(0);
     }
 
-    // swipe on mobile
-    const carousel = modal.querySelector(".toyod-carousel");
-    if (carousel) {
-      let x0 = null;
-      carousel.ontouchstart = (e) => {
-        x0 = e.touches?.[0]?.clientX ?? null;
-      };
-      carousel.ontouchend = (e) => {
-        if (x0 == null) return;
-        const x1 = e.changedTouches?.[0]?.clientX ?? null;
-        if (x1 == null) return;
-        const dx = x1 - x0;
-        if (Math.abs(dx) > 40) {
-          go(dx > 0 ? -1 : 1);
-        }
-        x0 = null;
-      };
-    }
-
-    render();
-    modal.style.display = "flex";
+    imgModal.style.display = "flex";
   };
 
-  const closeImgModal = () => {
-    const modal = document.getElementById(IDS.imgModal);
-    if (!modal) return;
-    modal.style.display = "none";
+  const closeModal = () => {
+    if (!imgModal) return;
+    imgModal.style.display = "none";
   };
 
-
-
-  // ====== Top Icons（同時支援：icon* / btnCart btnSearch btnMember） ======
-  const ensureCartBadgeOnButton = (btn) => {
-    if (!btn) return null;
-    let badge = document.getElementById(IDS.cartCount);
-    if (badge) return badge;
-
-    badge = document.createElement("span");
-    badge.id = IDS.cartCount;
-    badge.textContent = "0";
-    badge.style.cssText =
-      "margin-left:6px; display:none; min-width:18px; height:18px; padding:0 6px; border-radius:999px; background:rgba(34,52,40,.9); color:#fff; font-size:11px; line-height:18px; text-align:center;";
-    btn.appendChild(badge);
-    return badge;
+  const stepModal = (delta) => {
+    if (!imgModal || imgModal.style.display !== "flex") return;
+    if (!modalImages.length) return;
+    const next = modalIndex + delta;
+    // reuse setIndex by simulating click on thumb
+    const modal = ensureModalInner();
+    const thumbs = $("#imgThumbs", modal);
+    const btn = thumbs?.querySelector(`button[data-idx="${(next + modalImages.length) % modalImages.length}"]`);
+    if (btn) btn.click();
   };
 
-  const bindTopIconsIfExist = () => {
-    const ig = document.getElementById(IDS.iconIG);
-    if (ig) ig.addEventListener("click", (e) => (e.preventDefault(), window.open(IG_URL, "_blank", "noopener")));
+  // --- UI builders ---
+  const buildCategoryPills = () => {
+    if (!categoryBar) return;
 
-    const line = document.getElementById(IDS.iconLINE);
-    if (line) line.addEventListener("click", (e) => (e.preventDefault(), window.open(LINE_URL, "_blank", "noopener")));
+    const catsFromData = ALL_PRODUCTS
+      .map((p) => String(p.category || "").trim())
+      .filter(Boolean);
 
-    const cart =
-      document.getElementById(IDS.iconCart) ||
-      document.getElementById("btnCart");
-    if (cart) {
-      ensureCartBadgeOnButton(cart);
-      cart.addEventListener("click", (e) => {
-        e.preventDefault();
-        openCart();
-      });
-    }
+    // keep order you want
+    const preset = ["全部", "項鍊", "手鏈", "耳環", "戒指"];
+    const dynamic = Array.from(new Set(catsFromData)).filter((c) => !preset.includes(c));
+    const cats = [...preset, ...dynamic].filter((c, i, a) => a.indexOf(c) === i);
 
-    const search =
-      document.getElementById(IDS.iconSearch) ||
-      document.getElementById("btnSearch");
-    if (search) {
-      search.addEventListener("click", (e) => {
-        e.preventDefault();
-        const kw = prompt("搜尋商品名稱：");
-        if (kw == null) return;
-        const k = kw.trim();
-        if (!k) return;
-        const base = CURRENT_SUBSET.length ? CURRENT_SUBSET : ALL_PRODUCTS;
-        renderProducts(base.filter((p) => String(p.name || "").includes(k)));
-        scrollToProducts();
-      });
-    }
-
-    const member =
-      document.getElementById(IDS.iconMember) ||
-      document.getElementById("btnMember");
-    if (member) {
-      member.addEventListener("click", (e) => {
-        e.preventDefault();
-        alert("會員功能（待接）");
-      });
-    }
-  };
-
-  // ====== Cart ======
-  const loadCart = () => {
-    try {
-      const raw = localStorage.getItem(STORE_KEY);
-      if (!raw) return [];
-      const arr = JSON.parse(raw);
-      return Array.isArray(arr) ? arr : [];
-    } catch {
-      return [];
-    }
-  };
-
-  const saveCart = (cart) => {
-    localStorage.setItem(STORE_KEY, JSON.stringify(cart));
-    updateCartBadge();
-  };
-
-  const updateCartBadge = () => {
-    const cartBtn = document.getElementById(IDS.iconCart) || document.getElementById("btnCart");
-    if (cartBtn) ensureCartBadgeOnButton(cartBtn);
-
-    const badge = document.getElementById(IDS.cartCount);
-    if (!badge) return;
-
-    const cart = loadCart();
-    const totalQty = cart.reduce((sum, it) => sum + (Number(it.qty) || 0), 0);
-    badge.textContent = String(totalQty);
-    badge.style.display = totalQty > 0 ? "inline-flex" : "none";
-  };
-
-  const addToCart = (product, styleName = "", qty = 1) => {
-    const cart = loadCart();
-    const key = `${product.id || product.name || "item"}__${styleName || ""}`;
-    const idx = cart.findIndex((x) => x.key === key);
-
-    const price = Number(product.price) || 0;
-    const item = {
-      key,
-      id: product.id || "",
-      name: product.name || "",
-      style: styleName || "",
-      price,
-      image: normalizeImages(product.images)[0] || "",
-      qty: Math.max(1, Number(qty) || 1),
-    };
-
-    if (idx >= 0) cart[idx].qty += item.qty;
-    else cart.push(item);
-
-    saveCart(cart);
-    renderCart();
-    openCart();
-  };
-
-  const removeFromCart = (key) => {
-    const cart = loadCart().filter((x) => x.key !== key);
-    saveCart(cart);
-    renderCart();
-  };
-
-  const setCartQty = (key, qty) => {
-    const cart = loadCart();
-    const idx = cart.findIndex((x) => x.key === key);
-    if (idx < 0) return;
-    cart[idx].qty = Math.max(1, Number(qty) || 1);
-    saveCart(cart);
-    renderCart();
-  };
-
-  const calcSubtotal = () => {
-    const cart = loadCart();
-    return cart.reduce((sum, it) => sum + (Number(it.price) || 0) * (Number(it.qty) || 0), 0);
-  };
-
-  const openCart = () => {
-    ensureCartDrawer();
-    const drawer = document.getElementById(IDS.cartDrawer);
-    drawer.style.transform = "translateX(0)";
-    drawer.style.pointerEvents = "auto";
-    renderCart();
-  };
-
-  const closeCart = () => {
-    const drawer = document.getElementById(IDS.cartDrawer);
-    if (!drawer) return;
-    drawer.style.transform = "translateX(110%)";
-    drawer.style.pointerEvents = "none";
-  };
-
-  const renderCart = () => {
-    ensureCartDrawer();
-    const wrap = document.getElementById(IDS.cartItems);
-    const subtotalEl = document.getElementById(IDS.cartSubtotal);
-
-    const cart = loadCart();
-    const subtotal = calcSubtotal();
-    subtotalEl.textContent = ntd(subtotal);
-
-    if (!cart.length) {
-      wrap.innerHTML = `<div style="padding: 14px 2px; font-size:13px; opacity:.7;">購物車目前是空的。</div>`;
-      return;
-    }
-
-    wrap.innerHTML = cart
-      .map((it) => {
-        const title = escapeHtml(it.name);
-        const st = it.style ? ` <span style="opacity:.65;">(${escapeHtml(it.style)})</span>` : "";
-        const img = it.image
-          ? `<img src="${escapeHtml(it.image)}" alt="" onerror="this.onerror=null;this.src='${IMG_FALLBACK}'" style="width:56px;height:56px;border-radius:12px;object-fit:cover;border:1px solid rgba(0,0,0,0.08);">`
-          : `<div style="width:56px;height:56px;border-radius:12px;background:rgba(0,0,0,0.06);"></div>`;
-        const price = Number(it.price) || 0;
-        const qty = Number(it.qty) || 1;
-        const line = price * qty;
-
-        return `
-          <div style="display:flex; gap:10px; padding:12px 0; border-bottom:1px solid rgba(0,0,0,0.08); align-items:flex-start;">
-            ${img}
-            <div style="flex:1; min-width: 0;">
-              <div style="font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                ${title}${st}
-              </div>
-              <div style="margin-top:6px; display:flex; align-items:center; justify-content:space-between; gap:10px;">
-                <div style="font-size:12px; opacity:.75;">NT$ ${ntd(price)}</div>
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <button data-cart-dec="${escapeHtml(it.key)}"
-                    style="width:28px;height:28px;border-radius:10px;border:1px solid rgba(0,0,0,0.15);background:#fff;cursor:pointer;">-</button>
-                  <input data-cart-qty="${escapeHtml(it.key)}" value="${qty}" inputmode="numeric"
-                    style="width:42px;height:28px;border-radius:10px;border:1px solid rgba(0,0,0,0.15);text-align:center;">
-                  <button data-cart-inc="${escapeHtml(it.key)}"
-                    style="width:28px;height:28px;border-radius:10px;border:1px solid rgba(0,0,0,0.15);background:#fff;cursor:pointer;">+</button>
-                </div>
-              </div>
-
-              <div style="margin-top:8px; display:flex; align-items:center; justify-content:space-between;">
-                <div style="font-size:12px; opacity:.85;">小計：NT$ ${ntd(line)}</div>
-                <button data-cart-remove="${escapeHtml(it.key)}"
-                  style="border:0;background:transparent; font-size:12px; opacity:.6; cursor:pointer; text-decoration:underline;">
-                  移除
-                </button>
-              </div>
-            </div>
-          </div>
-        `;
-      })
-      .join("");
-
-    // Bind cart controls
-    $$("[data-cart-remove]", wrap).forEach((btn) => {
-      btn.addEventListener("click", () => removeFromCart(btn.dataset.cartRemove));
-    });
-    $$("[data-cart-inc]", wrap).forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const key = btn.dataset.cartInc;
-        const cart = loadCart();
-        const it = cart.find((x) => x.key === key);
-        if (!it) return;
-        setCartQty(key, (Number(it.qty) || 1) + 1);
-      });
-    });
-    $$("[data-cart-dec]", wrap).forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const key = btn.dataset.cartDec;
-        const cart = loadCart();
-        const it = cart.find((x) => x.key === key);
-        if (!it) return;
-        setCartQty(key, Math.max(1, (Number(it.qty) || 1) - 1));
-      });
-    });
-    $$("[data-cart-qty]", wrap).forEach((inp) => {
-      inp.addEventListener("change", () => {
-        const key = inp.dataset.cartQty;
-        const v = Number(String(inp.value).replace(/[^\d]/g, "")) || 1;
-        inp.value = String(v);
-        setCartQty(key, v);
-      });
-    });
-  };
-
-  // ====== Products ======
-  const uniq = (arr) => Array.from(new Set(arr));
-
-  const CATEGORY_ORDER = ["全部","項鍊","手鏈","耳環","戒指","其他"];
-  const normalizeCategory = (c) => {
-    const s = String(c || "").trim();
-    if (!s) return "其他";
-    if (CATEGORY_ORDER.includes(s)) return s;
-    return "其他";
-  };
-
-  const buildCategoryPills = (products) => {
-    const bar = document.getElementById(IDS.categoryBar);
-    if (!bar) return;
-
-        const present = products.map((p)=> normalizeCategory(p.category)).filter(Boolean);
-    const cats = CATEGORY_ORDER.filter((c)=> c==="全部" || present.includes(c));
-
-    bar.innerHTML = cats
+    categoryBar.innerHTML = cats
       .map((c) => {
-        const active = c === CURRENT_CATEGORY;
+        const active = c === CURRENT_CAT;
         return `
-          <button data-cat="${escapeHtml(c)}"
-            style="
-              flex: 0 0 auto;
-              padding: 8px 14px;
-              border-radius: 999px;
-              border: 1px solid rgba(0,0,0,0.12);
-              background: ${active ? "rgba(34,52,40,0.85)" : "rgba(255,255,255,0.45)"};
-              color: ${active ? "#fff" : "rgba(40,40,40,0.85)"};
-              font-size: 13px;
-              cursor: pointer;
-              white-space: nowrap;
-            ">
+          <button class="cat-pill" data-cat="${escapeHtml(c)}"
+            style="flex:0 0 auto; padding:8px 14px; border-radius:999px; border:1px solid rgba(0,0,0,0.12);
+              background:${active ? "rgba(34,52,40,0.88)" : "rgba(255,255,255,0.55)"};
+              color:${active ? "#fff" : "rgba(40,40,40,0.86)"};
+              font-size:13px; cursor:pointer; white-space:nowrap;">
             ${escapeHtml(c)}
           </button>
         `;
       })
       .join("");
 
-    $$("button[data-cat]", bar).forEach((btn) => {
+    $$("button[data-cat]", categoryBar).forEach((btn) => {
       btn.addEventListener("click", () => {
-        CURRENT_CATEGORY = btn.dataset.cat || "全部";
-        const filtered =
-          CURRENT_CATEGORY === "全部"
-            ? products
-            : products.filter((p) => normalizeCategory(p.category) === CURRENT_CATEGORY);
-        buildCategoryPills(products);
-        renderProducts(filtered);
-        scrollToProducts();
+        CURRENT_CAT = btn.dataset.cat || "全部";
+        buildCategoryPills();
+        renderProducts();
       });
     });
   };
 
-  const renderProducts = (products) => {
-    const grid = document.getElementById(IDS.productsGrid);
-    if (!grid) return;
+  const renderProducts = () => {
+    const list =
+      CURRENT_CAT === "全部"
+        ? ALL_PRODUCTS
+        : ALL_PRODUCTS.filter((p) => String(p.category || "").trim() === CURRENT_CAT);
 
-    if (!products.length) {
-      grid.innerHTML = `<div style="padding: 14px 4px; opacity:.7; font-size:13px;">目前沒有商品。</div>`;
+    if (!list.length) {
+      productsGrid.innerHTML = `<div style="padding:14px 4px; opacity:.75; font-size:13px;">目前沒有商品。</div>`;
       return;
     }
 
-    grid.innerHTML = products
+    productsGrid.innerHTML = list
       .map((p) => {
-        const name = escapeHtml(p.name || "");
-        const id = escapeHtml(p.id || "");
-        const category = escapeHtml(normalizeCategory(p.category));
-        const collection = escapeHtml(p.collection || "");
-        const status = String(p.status || "").trim();
-        const price = Number(p.price) || 0;
-
         const imgs = normalizeImages(p.images);
         const cover = imgs[0] || "";
-
         const styles = normalizeStyles(p.styles);
         const hasStyles = styles.length > 0;
 
-        const key = String(p.id || p.name || "");
-
         return `
-          <div class="product-card"
-               style="border-radius:18px; background: rgba(255,255,255,0.55); border:1px solid rgba(0,0,0,0.08); overflow:hidden;">
-            <button data-open-modal="${escapeHtml(key)}"
-                    style="border:0; background:transparent; padding:0; cursor:pointer; display:block; width:100%;">
-              <div style="width:100%; height: 220px; background: rgba(0,0,0,0.05);">
+          <div class="product-card" style="border-radius:18px; background:rgba(255,255,255,0.55);
+            border:1px solid rgba(0,0,0,0.08); overflow:hidden;">
+            <button type="button" class="open-modal" data-key="${escapeHtml(p.id || p.name || "")}"
+              style="border:0; background:transparent; padding:0; cursor:pointer; display:block; width:100%;">
+              <div style="width:100%; height:220px; background:rgba(0,0,0,0.05);">
                 ${
                   cover
-                    ? `<img src="${escapeHtml(cover)}" alt="${name}" onerror="this.onerror=null;this.src='${IMG_FALLBACK}'"
-                         style="width:100%; height:220px; object-fit:cover; display:block;">`
-                    : `<div style="width:100%; height:220px; display:flex; align-items:center; justify-content:center; opacity:.45; font-size:12px;">No Image</div>`
+                    ? `<img src="${escapeHtml(cover)}" alt="${escapeHtml(p.name || "")}"
+                        style="width:100%; height:220px; object-fit:cover; display:block;">`
+                    : `<div style="width:100%; height:220px; display:flex; align-items:center; justify-content:center; opacity:.5; font-size:12px;">No Image</div>`
                 }
               </div>
             </button>
 
-            <div style="padding: 12px 12px 12px;">
-              <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px;">
+            <div style="padding:12px 12px 14px;">
+              <div style="display:flex; justify-content:space-between; gap:10px;">
                 <div style="min-width:0;">
                   <div style="font-size:13px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                    ${name}
+                    ${escapeHtml(p.name || "")}
                   </div>
                   <div style="margin-top:4px; font-size:12px; opacity:.65;">
-                    ${collection ? `${collection}` : ""}${category ? ` · ${category}` : ""}
-                    ${id ? ` · ${id}` : ""}
+                    ${escapeHtml(p.collection || "")}${p.collection && p.category ? " · " : ""}${escapeHtml(p.category || "")}
+                    ${p.id ? " · " + escapeHtml(p.id) : ""}
                   </div>
                 </div>
-
                 <div style="text-align:right;">
-                  <div style="font-size:13px; font-weight:700;">NT$ ${ntd(price)}</div>
-                  ${
-                    status
-                      ? `<div style="margin-top:3px; font-size:11px; opacity:.6;">${escapeHtml(status)}</div>`
-                      : ""
-                  }
+                  <div style="font-size:13px; font-weight:700;">NT$ ${ntd(p.price)}</div>
+                  ${p.status ? `<div style="margin-top:3px; font-size:11px; opacity:.6;">${escapeHtml(p.status)}</div>` : ""}
                 </div>
               </div>
 
               ${
                 hasStyles
-                  ? `
-                <div style="margin-top:10px;">
-                  <div style="font-size:12px; opacity:.75; margin-bottom:6px;">款式</div>
-                  <select data-style-select="${escapeHtml(key)}"
-                          style="width:100%; padding:9px 10px; border-radius:12px; border:1px solid rgba(0,0,0,0.12); background: rgba(255,255,255,0.65);">
-                    ${styles
-                      .map((s, idx) => `<option value="${escapeHtml(s)}"${idx === 0 ? " selected" : ""}>${escapeHtml(s)}</option>`)
-                      .join("")}
-                  </select>
-                </div>`
+                  ? `<div style="margin-top:10px;">
+                      <div style="font-size:12px; opacity:.75; margin-bottom:6px;">款式</div>
+                      <select data-style="${escapeHtml(p.id || p.name || "")}"
+                        style="width:100%; padding:9px 10px; border-radius:12px; border:1px solid rgba(0,0,0,0.12); background:rgba(255,255,255,0.65);">
+                        ${styles.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("")}
+                      </select>
+                    </div>`
                   : ""
               }
 
               <div style="margin-top:10px; display:flex; align-items:center; justify-content:space-between; gap:10px;">
                 <div style="display:flex; align-items:center; gap:8px;">
-                  <button data-qty-dec="${escapeHtml(key)}"
-                    style="width:30px;height:30px;border-radius:10px;border:1px solid rgba(0,0,0,0.15);background:#fff;cursor:pointer;">-</button>
-                  <input data-qty-input="${escapeHtml(key)}" value="1" inputmode="numeric"
-                    style="width:44px;height:30px;border-radius:10px;border:1px solid rgba(0,0,0,0.15);text-align:center;">
-                  <button data-qty-inc="${escapeHtml(key)}"
-                    style="width:30px;height:30px;border-radius:10px;border:1px solid rgba(0,0,0,0.15);background:#fff;cursor:pointer;">+</button>
+                  <button type="button" data-dec="${escapeHtml(p.id || p.name || "")}"
+                    style="width:30px; height:30px; border-radius:10px; border:1px solid rgba(0,0,0,0.15); background:#fff; cursor:pointer;">-</button>
+                  <input data-qty="${escapeHtml(p.id || p.name || "")}" value="1" inputmode="numeric"
+                    style="width:44px; height:30px; border-radius:10px; border:1px solid rgba(0,0,0,0.15); text-align:center;">
+                  <button type="button" data-inc="${escapeHtml(p.id || p.name || "")}"
+                    style="width:30px; height:30px; border-radius:10px; border:1px solid rgba(0,0,0,0.15); background:#fff; cursor:pointer;">+</button>
                 </div>
 
-                <button data-add-cart="${escapeHtml(key)}"
-                  style="padding: 10px 12px; border-radius: 14px; border:0; background: rgba(34,52,40,0.85); color:#fff; cursor:pointer; font-size:13px; white-space:nowrap;">
+                <button type="button" class="add-cart" data-key="${escapeHtml(p.id || p.name || "")}"
+                  style="padding:10px 12px; border-radius:14px; border:0; background:rgba(34,52,40,0.88); color:#fff; cursor:pointer; font-size:13px; white-space:nowrap;">
                   加入購物車
                 </button>
               </div>
@@ -801,21 +354,21 @@ document.addEventListener("DOMContentLoaded", () => {
       })
       .join("");
 
-    // open modal
-    $$("[data-open-modal]", grid).forEach((btn) => {
+    // bind modal open
+    $$(".open-modal", productsGrid).forEach((btn) => {
       btn.addEventListener("click", () => {
-        const key = btn.dataset.openModal;
-        const product = ALL_PRODUCTS.find((p) => String(p.id || p.name || "") === String(key));
-        if (product) openImgModal(product);
+        const key = btn.dataset.key;
+        const product = ALL_PRODUCTS.find((x) => String(x.id || x.name) === String(key));
+        if (product) renderModal(product);
       });
     });
 
-    // qty helpers (避免 cssEscape 相容問題：用 attribute selector 不做 escape)
-    const getQtyInput = (key) => $(`[data-qty-input="${cssEscape(key)}"]`, grid);
+    // qty controls
+    const getQtyInput = (key) => productsGrid.querySelector(`input[data-qty="${CSS.escape(key)}"]`);
 
-    $$("[data-qty-inc]", grid).forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const key = btn.dataset.qtyInc;
+    $$("button[data-inc]", productsGrid).forEach((b) => {
+      b.addEventListener("click", () => {
+        const key = b.dataset.inc;
         const inp = getQtyInput(key);
         if (!inp) return;
         const v = Number(String(inp.value).replace(/[^\d]/g, "")) || 1;
@@ -823,9 +376,9 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     });
 
-    $$("[data-qty-dec]", grid).forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const key = btn.dataset.qtyDec;
+    $$("button[data-dec]", productsGrid).forEach((b) => {
+      b.addEventListener("click", () => {
+        const key = b.dataset.dec;
         const inp = getQtyInput(key);
         if (!inp) return;
         const v = Number(String(inp.value).replace(/[^\d]/g, "")) || 1;
@@ -833,180 +386,45 @@ document.addEventListener("DOMContentLoaded", () => {
       });
     });
 
-    $$("[data-qty-input]", grid).forEach((inp) => {
+    $$("input[data-qty]", productsGrid).forEach((inp) => {
       inp.addEventListener("change", () => {
         const v = Number(String(inp.value).replace(/[^\d]/g, "")) || 1;
         inp.value = String(Math.max(1, Math.min(99, v)));
       });
     });
 
-    // add cart
-    $$("[data-add-cart]", grid).forEach((btn) => {
+    // add-to-cart (if your site has cart implementation, hook here; otherwise no-op)
+    $$(".add-cart", productsGrid).forEach((btn) => {
       btn.addEventListener("click", () => {
-        const key = btn.dataset.addCart;
-        const product = ALL_PRODUCTS.find((p) => String(p.id || p.name || "") === String(key));
-        if (!product) return;
-
-        const qtyInp = getQtyInput(key);
-        const qty = qtyInp ? Number(String(qtyInp.value).replace(/[^\d]/g, "")) || 1 : 1;
-
-        let styleName = "";
-        const sel = $(`[data-style-select="${cssEscape(key)}"]`, grid);
-        if (sel) styleName = sel.value || "";
-
-        addToCart(product, styleName, qty);
+        // If you already have cart logic elsewhere, you can replace this block.
+        alert("已加入購物車（示範版）");
       });
     });
   };
 
-  const scrollToProducts = () => {
-    const wrap = document.getElementById(IDS.productsWrap);
-    if (!wrap) return;
-    wrap.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
-
-  // ====== Notice ======
-  const renderNotice = (noticeArr) => {
-    const wrap = document.getElementById(IDS.noticeWrap);
-    if (!wrap) return;
-
-    const list = Array.isArray(noticeArr) ? noticeArr : [];
-    const active = list.filter((n) => String(n.active).toLowerCase() !== "false" && n.active !== 0);
-
-    if (!active.length) {
-      wrap.innerHTML = "";
-      return;
-    }
-
-    wrap.innerHTML = active
-      .map((n) => {
-        const title = escapeHtml(n.title || "公告");
-        const content = escapeHtml(n.content || "");
-        return `
-          <div style="
-            margin: 10px 0;
-            padding: 12px 14px;
-            border-radius: 16px;
-            border: 1px solid rgba(241, 196, 15, 0.35);
-            background: rgba(241, 196, 15, 0.13);
-          ">
-            <div style="display:flex; align-items:center; gap:10px;">
-              <span style="display:inline-flex; align-items:center; justify-content:center; width:40px; height:22px;
-                border-radius: 999px; border:1px solid rgba(241,196,15,.45); background: rgba(255,255,255,.35);
-                font-size:12px; opacity:.9;">公告</span>
-              <div style="font-weight:700; font-size:13px;">${title}</div>
-            </div>
-            ${content ? `<div style="margin-top:8px; font-size:12.5px; line-height:1.75; opacity:.85; white-space:pre-wrap;">${content}</div>` : ""}
-          </div>
-        `;
-      })
-      .join("");
-  };
-
-  // ====== Fetch API ======
+  // --- fetch ---
   const fetchData = async () => {
     try {
       const res = await fetch(API_URL, { cache: "no-store" });
       const data = await res.json();
-      console.log("API 回來的資料", data);
-
-      ALL_PRODUCTS = Array.isArray(data.products) ? data.products : [];
-      // normalize categories to the fixed set (others -> 其他)
-      ALL_PRODUCTS = ALL_PRODUCTS.map((p)=> ({...p, category: normalizeCategory(p.category)}));
-      const notice = Array.isArray(data.notice) ? data.notice : [];
-      DISCOUNT = Array.isArray(data.discount) ? data.discount : [];
-      window.DISCOUNT = DISCOUNT;
-
-      renderNotice(notice);
-      updateCartBadge();
-      // re-apply current page after data loaded
-      applyPage(CURRENT_PAGE, {skipScroll:true});
-    } catch (err) {
-      console.error("API 錯誤", err);
-      const wrap = document.getElementById(IDS.noticeWrap);
-      if (wrap) {
-        wrap.innerHTML = `
-          <div style="margin: 10px 0; padding: 12px 14px; border-radius: 16px; border:1px solid rgba(255,0,0,0.15); background: rgba(255,0,0,0.06);">
-            <div style="font-weight:700; font-size:13px;">資料載入失敗</div>
-            <div style="margin-top:6px; font-size:12px; opacity:.8; line-height:1.7;">
-              請確認 Google Apps Script 已部署為「網頁應用程式」，並允許存取。<br>
-              （你也可以開 F12 Console 看錯誤原因）
-            </div>
+      const products = Array.isArray(data.products) ? data.products : [];
+      // only show "上架" by default if status exists
+      ALL_PRODUCTS = products.filter((p) => !p.status || String(p.status).trim() !== "下架");
+      buildCategoryPills();
+      renderProducts();
+    } catch (e) {
+      console.error(e);
+      productsGrid.innerHTML = `
+        <div style="padding:14px 4px; border-radius:14px; border:1px solid rgba(255,0,0,0.15); background:rgba(255,0,0,0.06);">
+          <div style="font-weight:700; font-size:13px;">商品資料載入失敗</div>
+          <div style="margin-top:6px; font-size:12px; opacity:.8; line-height:1.7;">
+            請確認 Google Apps Script Web App 可公開存取，並回傳 JSON。<br>
+            （按 F12 → Console 可看到詳細錯誤）
           </div>
-        `;
-      }
+        </div>
+      `;
     }
   };
 
-
-  // ====== Simple Router (hash pages) ======
-  const getPageFromHash = () => {
-    const h = (location.hash || "#home").replace("#", "").trim();
-    return h || "home";
-  };
-
-  const applyPage = (page, opts = {}) => {
-    CURRENT_PAGE = page;
-
-    // show/hide pages
-    $$("[data-page]").forEach((sec) => {
-      const p = sec.getAttribute("data-page");
-      const isProducts = p === "products";
-      const active =
-        (page === "home" && p === "home") ||
-        (page === "promo" && p === "promo") ||
-        (page === "tips" && p === "tips") ||
-        (page === "faq" && p === "faq") ||
-        ((page === "all" || page === "silver") && isProducts);
-
-      sec.classList.toggle("isActive", active);
-    });
-
-    // nav active
-    $$("[data-page-link]").forEach((a) => {
-      a.classList.toggle("isActive", a.getAttribute("data-page-link") === page);
-    });
-
-    // products page title and filter
-    if (page === "all" || page === "silver") {
-      const titleEl = document.getElementById("productsPageTitle");
-      if (titleEl) titleEl.textContent = page === "silver" ? "純銀飾品✨" : "全系列🌸";
-
-      CURRENT_CATEGORY = "全部";
-
-            const subset =
-        page === "silver"
-          ? ALL_PRODUCTS.filter((p) => {
-              const col = String(p.collection || "");
-              const silverFlag = String(p.silver || p.isSilver || "").toLowerCase();
-              return col.includes("純銀") || silverFlag === "true" || silverFlag === "1" || silverFlag === "yes";
-            })
-          : ALL_PRODUCTS;
-
-      CURRENT_SUBSET = subset;
-
-      buildCategoryPills(subset);
-
-      const filtered =
-        CURRENT_CATEGORY === "全部"
-          ? subset
-          : subset.filter((p) => normalizeCategory(p.category) === CURRENT_CATEGORY);
-
-      renderProducts(filtered);
-      if (!opts.skipScroll) scrollToProducts();
-    } else {
-      CURRENT_SUBSET = [];
-    }
-  };
-
-  window.addEventListener("hashchange", () => {
-    applyPage(getPageFromHash());
-  });
-
-  // ====== 初始化 ======
-  ensureMainLayoutIfMissing();
-  bindTopIconsIfExist();
-  // initial page skeleton
-  applyPage(getPageFromHash());
   fetchData();
 });
