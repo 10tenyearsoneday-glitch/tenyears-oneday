@@ -208,41 +208,55 @@ document.addEventListener("DOMContentLoaded", () => {
   // ====== 圖片 Modal ======
   const ensureImgModal = () => {
     let modal = document.getElementById(IDS.imgModal);
-    if (modal) return modal;
+
+    // 若 HTML 先放了一個空的 #imgModal（例如 index.html 內），這裡要補齊結構
+    const buildModal = (el) => {
+      el.id = IDS.imgModal;
+      el.setAttribute(
+        "style",
+        [
+          "position:fixed",
+          "inset:0",
+          "background: rgba(0,0,0,0.35)",
+          "display:none",
+          "align-items:center",
+          "justify-content:center",
+          "z-index:9998",
+          "padding: 18px",
+        ].join(";")
+      );
+
+      el.innerHTML = `
+        <div style="width:min(900px, 96vw); max-height: 90vh; overflow:auto; background:rgba(255,255,255,0.92); border-radius:18px; border:1px solid rgba(0,0,0,0.10); box-shadow: 0 22px 60px rgba(0,0,0,0.20);">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding: 14px 16px; border-bottom: 1px solid rgba(0,0,0,0.08);">
+            <h3 id="${IDS.imgTitle}" style="margin:0; font-size:15px; font-weight:600;">商品圖片</h3>
+            <button id="${IDS.closeImg}" style="border:0; background:transparent; font-size:20px; cursor:pointer;">×</button>
+          </div>
+          <div id="${IDS.imgBody}" style="padding: 14px 16px;"></div>
+        </div>
+      `;
+
+      // 重新綁定事件（避免重複 addEventListener）
+      const closeBtn = document.getElementById(IDS.closeImg);
+      if (closeBtn) closeBtn.onclick = closeImgModal;
+
+      el.onclick = (e) => {
+        if (e.target === el) closeImgModal();
+      };
+    };
+
+    if (modal) {
+      // 若缺少必要節點，就補齊（避免 openImgModal 取到 null）
+      const hasTitle = !!document.getElementById(IDS.imgTitle);
+      const hasBody = !!document.getElementById(IDS.imgBody);
+      const hasClose = !!document.getElementById(IDS.closeImg);
+      if (!hasTitle || !hasBody || !hasClose) buildModal(modal);
+      return modal;
+    }
 
     modal = document.createElement("div");
-    modal.id = IDS.imgModal;
-    modal.setAttribute(
-      "style",
-      [
-        "position:fixed",
-        "inset:0",
-        "background: rgba(0,0,0,0.35)",
-        "display:none",
-        "align-items:center",
-        "justify-content:center",
-        "z-index:9998",
-        "padding: 18px",
-      ].join(";")
-    );
-
-    modal.innerHTML = `
-      <div style="width:min(900px, 96vw); max-height: 90vh; overflow:auto; background:rgba(255,255,255,0.92); border-radius:18px; border:1px solid rgba(0,0,0,0.10); box-shadow: 0 22px 60px rgba(0,0,0,0.20);">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding: 14px 16px; border-bottom: 1px solid rgba(0,0,0,0.08);">
-          <h3 id="${IDS.imgTitle}" style="margin:0; font-size:15px; font-weight:600;">商品圖片</h3>
-          <button id="${IDS.closeImg}" style="border:0; background:transparent; font-size:20px; cursor:pointer;">×</button>
-        </div>
-        <div id="${IDS.imgBody}" style="padding: 14px 16px;"></div>
-      </div>
-    `;
-
+    buildModal(modal);
     document.body.appendChild(modal);
-
-    document.getElementById(IDS.closeImg).addEventListener("click", closeImgModal);
-    modal.addEventListener("click", (e) => {
-      if (e.target === modal) closeImgModal();
-    });
-
     return modal;
   };
 
@@ -284,15 +298,26 @@ document.addEventListener("DOMContentLoaded", () => {
   const openImgModal = (product) => {
     ensureImgModal();
     const modal = document.getElementById(IDS.imgModal);
-    const title = document.getElementById(IDS.imgTitle);
-    const body = document.getElementById(IDS.imgBody);
+    let titleEl = document.getElementById(IDS.imgTitle);
+    let bodyEl = document.getElementById(IDS.imgBody);
 
-    title.textContent = product?.name ? `商品圖片｜${product.name}` : "商品圖片";
+    // 保險：若頁面上先存在空的 #imgModal，可能造成 title/body 為 null
+    if (!titleEl || !bodyEl) {
+      ensureImgModal();
+      titleEl = document.getElementById(IDS.imgTitle);
+      bodyEl = document.getElementById(IDS.imgBody);
+    }
+    if (!titleEl || !bodyEl) {
+      console.warn('[tenyears_oneday] img modal elements missing');
+      return;
+    }
+
+    titleEl.textContent = product?.name ? `商品圖片｜${product.name}` : "商品圖片";
 
     const imgs = normalizeImages(product?.images);
     const desc = escapeHtml(product?.description || "");
 
-    body.innerHTML = `
+    bodyEl.innerHTML = `
       <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
         ${imgs
           .map(
