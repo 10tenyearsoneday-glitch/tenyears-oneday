@@ -1,17 +1,19 @@
-/* =========================================================
-   TENYEARS_ONEDAY - Products Page app.js (D FIX)
-   - Fetch products from Google Apps Script JSON
-   - Render category pills + product cards
-   - Image modal supports multiple images + next/prev
-   - Safe guards: no null crashes
-   ========================================================= */
-
+/* TENYEARS_ONEDAY - app.js (商品頁可用版)
+   - 讀 GAS JSON：{ products:[], notice:[], discount:[] }
+   - 商品卡：圖片 / 名稱 / 價格 / 款式 / 數量 / 加入購物車
+   - 點圖片：開啟 modal，可切換多張
+   - 購物車：右側抽屜、數量調整、移除、徽章
+*/
 document.addEventListener("DOMContentLoaded", () => {
-  const API_URL = "https://script.google.com/macros/s/AKfycbzTQDS9uZ67YPC3yu9B71Ba3WLwe6_4cL3tTe2ZhBcqi_SIjSbEqEbpB6pd2JpVg-hM/exec";
+  // ===== 基本設定 =====
+  const STORE_KEY = "tenyears_oneday_cart_v1";
+  const API_URL =
+    "https://script.google.com/macros/s/AKfycbzTQDS9uZ67YPC3yu9B71Ba3WLwe6_4cL3tTe2ZhBcqi_SIjSbEqEbpB6pd2JpVg-hM/exec";
 
-  // --- helpers ---
+  // ===== 小工具 =====
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+
   const escapeHtml = (s) =>
     String(s ?? "")
       .replaceAll("&", "&amp;")
@@ -22,18 +24,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const ntd = (n) => {
     const num = Number(n);
-    return Number.isFinite(num) ? num.toLocaleString("zh-TW") : "";
+    if (!Number.isFinite(num)) return "0";
+    return num.toLocaleString("zh-TW");
   };
 
   const normalizeImages = (images) => {
     if (!images) return [];
     if (Array.isArray(images)) return images.filter(Boolean).map(String);
     if (typeof images === "string") {
-      const parts = images
+      // 支援 , 或 | 分隔；也支援換行
+      return images
         .split(/[,|\n]/g)
         .map((s) => s.trim())
         .filter(Boolean);
-      return parts.length ? parts : [images.trim()];
     }
     return [];
   };
@@ -43,310 +46,272 @@ document.addEventListener("DOMContentLoaded", () => {
     if (Array.isArray(styles)) return styles.filter(Boolean).map(String);
     if (typeof styles === "string") {
       return styles
-        .split(/\n|,|、/g)
+        .split(/\n|,|、|\|/g)
         .map((s) => s.trim())
         .filter(Boolean);
     }
     return [];
   };
 
-  // --- state ---
-  let ALL_PRODUCTS = [];
-  let CURRENT_CAT = "全部";
+  const uniq = (arr) => Array.from(new Set(arr));
 
-  // --- elements (must exist in HTML) ---
-  const categoryBar = document.getElementById("categoryBar");
-  const productsGrid = document.getElementById("productsGrid");
-  const imgModal = document.getElementById("imgModal");
+  // ===== 確保頁面需要的容器存在（不破壞你原本排版）=====
+  const ensureEl = (id, tag = "div", parent = document.body, className = "") => {
+    let el = document.getElementById(id);
+    if (el) return el;
+    el = document.createElement(tag);
+    el.id = id;
+    if (className) el.className = className;
+    parent.appendChild(el);
+    return el;
+  };
 
-  if (!productsGrid) {
-    console.warn("Missing #productsGrid in HTML");
-    return;
-  }
+  // 你的 index.html 內已經有 imgModal（空 div），這裡會補齊 modal 結構
+  const ensureImgModal = () => {
+    const overlay = ensureEl("imgModal", "div", document.body, "modalOverlay");
+    // 已經有內容就不重建
+    if (overlay.dataset.ready === "1") return;
 
-  // --- modal (create inner) ---
-  const ensureModalInner = () => {
-    if (!imgModal) return null;
-
-    if (imgModal.dataset.ready === "1") return imgModal;
-
-    imgModal.style.display = "none";
-    imgModal.style.position = "fixed";
-    imgModal.style.inset = "0";
-    imgModal.style.zIndex = "9999";
-    imgModal.style.background = "rgba(0,0,0,0.45)";
-    imgModal.style.padding = "16px";
-    imgModal.style.alignItems = "center";
-    imgModal.style.justifyContent = "center";
-
-    imgModal.innerHTML = `
-      <div class="tym-modal" style="width:min(920px,96vw); max-height:90vh; overflow:auto;
-        border-radius:18px; background:rgba(255,255,255,0.95); border:1px solid rgba(0,0,0,0.10);
-        box-shadow:0 26px 70px rgba(0,0,0,0.28);">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;
-          padding:14px 16px; border-bottom:1px solid rgba(0,0,0,0.08);">
-          <div id="imgTitle" style="font-weight:700; font-size:14px;">商品圖片</div>
-          <button id="closeImg" style="border:0; background:transparent; font-size:22px; cursor:pointer;">×</button>
+    overlay.innerHTML = `
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="imgTitle">
+        <div class="modalHead">
+          <h3 id="imgTitle">商品圖片</h3>
+          <button class="closeX" id="closeImg" aria-label="關閉">×</button>
         </div>
-
-        <div style="padding:14px 16px;">
-          <div style="display:grid; grid-template-columns: 1fr; gap:12px;">
-            <div style="position:relative;">
-              <button id="imgPrev" aria-label="上一張"
-                style="position:absolute; left:10px; top:50%; transform:translateY(-50%);
-                  width:40px; height:40px; border-radius:999px; border:0; cursor:pointer;
-                  background:rgba(255,255,255,0.75); backdrop-filter: blur(6px); display:none;">‹</button>
-              <button id="imgNext" aria-label="下一張"
-                style="position:absolute; right:10px; top:50%; transform:translateY(-50%);
-                  width:40px; height:40px; border-radius:999px; border:0; cursor:pointer;
-                  background:rgba(255,255,255,0.75); backdrop-filter: blur(6px); display:none;">›</button>
-
-              <a id="imgLink" href="#" target="_blank" rel="noreferrer"
-                style="display:block; border-radius:16px; overflow:hidden; border:1px solid rgba(0,0,0,0.10); background:#fff;">
-                <img id="imgMain" alt="" style="width:100%; height:min(56vh,520px); object-fit:cover; display:block;">
-              </a>
-            </div>
-
-            <div id="imgThumbs" style="display:flex; gap:10px; overflow:auto; padding-bottom:4px;"></div>
-
-            <div id="imgDesc" style="font-size:13px; line-height:1.8; opacity:.86; white-space:pre-wrap;"></div>
-          </div>
-        </div>
+        <div class="modalBody" id="imgBody"></div>
       </div>
     `;
+    overlay.dataset.ready = "1";
 
-    imgModal.dataset.ready = "1";
-    imgModal.style.display = "none";
-    imgModal.style.display = "flex"; // for alignment baseline
-    imgModal.style.display = "none";
-
-    // close
-    $("#closeImg", imgModal)?.addEventListener("click", closeModal);
-    imgModal.addEventListener("click", (e) => {
-      if (e.target === imgModal) closeModal();
+    // 點背景關閉
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) closeImgModal();
     });
-
-    document.addEventListener("keydown", (e) => {
-      if (imgModal.style.display !== "flex") return;
-      if (e.key === "Escape") closeModal();
-      if (e.key === "ArrowLeft") stepModal(-1);
-      if (e.key === "ArrowRight") stepModal(1);
-    });
-
-    return imgModal;
+    $("#closeImg")?.addEventListener("click", closeImgModal);
   };
 
-  let modalImages = [];
-  let modalIndex = 0;
+  const openImgModal = (product) => {
+    ensureImgModal();
+    const titleEl = document.getElementById("imgTitle");
+    const bodyEl = document.getElementById("imgBody");
+    const overlay = document.getElementById("imgModal");
+    if (!titleEl || !bodyEl || !overlay) return;
 
-  const renderModal = (product) => {
-    const modal = ensureModalInner();
-    if (!modal) return;
+    const imgs = normalizeImages(product?.images);
+    const desc = escapeHtml(product?.description || "");
+    let idx = 0;
 
-    modalImages = normalizeImages(product?.images);
-    modalIndex = 0;
+    const render = () => {
+      const current = imgs[idx] || "";
+      bodyEl.innerHTML = `
+        <div class="modalGallery">
+          <button class="navBtn" id="prevImg" ${imgs.length <= 1 ? "disabled" : ""}>‹</button>
+          <div class="stage">
+            ${
+              current
+                ? `<img class="stageImg" src="${escapeHtml(current)}" alt="">`
+                : `<div class="stageEmpty">沒有圖片</div>`
+            }
+            <div class="pager">${imgs.length ? `${idx + 1} / ${imgs.length}` : ""}</div>
+          </div>
+          <button class="navBtn" id="nextImg" ${imgs.length <= 1 ? "disabled" : ""}>›</button>
+        </div>
 
-    const titleEl = $("#imgTitle", modal);
-    const mainImg = $("#imgMain", modal);
-    const linkEl = $("#imgLink", modal);
-    const thumbs = $("#imgThumbs", modal);
-    const descEl = $("#imgDesc", modal);
-    const prevBtn = $("#imgPrev", modal);
-    const nextBtn = $("#imgNext", modal);
+        ${
+          imgs.length > 1
+            ? `<div class="thumbs">
+                ${imgs
+                  .map(
+                    (src, i) => `
+                    <button class="thumb ${i === idx ? "isActive" : ""}" data-thumb="${i}">
+                      <img src="${escapeHtml(src)}" alt="">
+                    </button>`
+                  )
+                  .join("")}
+              </div>`
+            : ""
+        }
 
-    if (titleEl) titleEl.textContent = product?.name ? `商品圖片｜${product.name}` : "商品圖片";
+        ${
+          desc
+            ? `<div class="modalDesc">${desc.replaceAll("\n", "<br>")}</div>`
+            : ""
+        }
+      `;
 
-    const desc = String(product?.description ?? "").trim();
-    if (descEl) descEl.textContent = desc;
-
-    const setIndex = (idx) => {
-      if (!modalImages.length) return;
-      modalIndex = (idx + modalImages.length) % modalImages.length;
-      const src = modalImages[modalIndex];
-      if (mainImg) mainImg.src = src;
-      if (linkEl) linkEl.href = src;
-
-      // highlight thumb
-      if (thumbs) {
-        $$("button[data-idx]", thumbs).forEach((b) => {
-          b.style.outline = (Number(b.dataset.idx) === modalIndex) ? "2px solid rgba(34,52,40,0.85)" : "0";
-          b.style.outlineOffset = "2px";
+      $("#prevImg")?.addEventListener("click", () => {
+        idx = (idx - 1 + imgs.length) % imgs.length;
+        render();
+      });
+      $("#nextImg")?.addEventListener("click", () => {
+        idx = (idx + 1) % imgs.length;
+        render();
+      });
+      $$("[data-thumb]", bodyEl).forEach((b) => {
+        b.addEventListener("click", () => {
+          idx = Number(b.dataset.thumb) || 0;
+          render();
         });
-      }
+      });
     };
 
-    // thumbs
-    if (thumbs) {
-      thumbs.innerHTML = modalImages
-        .map((src, i) => `
-          <button data-idx="${i}" style="flex:0 0 auto; padding:0; border:0; background:transparent; cursor:pointer;">
-            <img src="${escapeHtml(src)}" alt=""
-              style="width:88px; height:64px; object-fit:cover; border-radius:12px; border:1px solid rgba(0,0,0,0.10); display:block;">
-          </button>
-        `)
-        .join("");
+    titleEl.textContent = product?.name ? `商品圖片｜${product.name}` : "商品圖片";
+    overlay.style.display = "flex";
+    render();
+  };
 
-      $$("button[data-idx]", thumbs).forEach((b) => {
-        b.addEventListener("click", () => setIndex(Number(b.dataset.idx) || 0));
-      });
+  const closeImgModal = () => {
+    const overlay = document.getElementById("imgModal");
+    if (overlay) overlay.style.display = "none";
+  };
+
+  // ===== 購物車（抽屜）=====
+  const loadCart = () => {
+    try {
+      const raw = localStorage.getItem(STORE_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      return [];
     }
+  };
 
-    const showNav = modalImages.length > 1;
-    if (prevBtn) prevBtn.style.display = showNav ? "inline-flex" : "none";
-    if (nextBtn) nextBtn.style.display = showNav ? "inline-flex" : "none";
+  const saveCart = (cart) => {
+    localStorage.setItem(STORE_KEY, JSON.stringify(cart));
+    updateCartBadge();
+  };
 
-    prevBtn?.addEventListener("click", () => stepModal(-1));
-    nextBtn?.addEventListener("click", () => stepModal(1));
+  const calcSubtotal = () =>
+    loadCart().reduce((sum, it) => sum + (Number(it.price) || 0) * (Number(it.qty) || 0), 0);
 
-    // placeholder if no images
-    if (!modalImages.length) {
-      if (mainImg) {
-        mainImg.removeAttribute("src");
-        mainImg.alt = "No image";
-        mainImg.style.objectFit = "contain";
-        mainImg.style.background = "rgba(0,0,0,0.06)";
+  const ensureCartDrawer = () => {
+    let drawer = document.getElementById("cartDrawer");
+    if (drawer) return;
+
+    drawer = document.createElement("div");
+    drawer.id = "cartDrawer";
+    drawer.className = "cartDrawer";
+    drawer.innerHTML = `
+      <div class="cartHead">
+        <div class="cartTitle">購物車</div>
+        <button class="cartClose" id="cartCloseBtn" aria-label="關閉">×</button>
+      </div>
+      <div class="cartItems" id="cartItems"></div>
+      <div class="cartFoot">
+        <div class="row">
+          <div>小計</div>
+          <div>NT$ <span id="cartSubtotal">0</span></div>
+        </div>
+        <div class="rowBtns">
+          <button class="btnGhost" id="cartContinueBtn">繼續購物</button>
+          <button class="btnSolid" id="cartCheckoutBtn">前往結帳</button>
+        </div>
+        <div class="hint">登入會員（待接會員功能）</div>
+      </div>
+    `;
+    document.body.appendChild(drawer);
+
+    $("#cartCloseBtn").addEventListener("click", closeCart);
+    $("#cartContinueBtn").addEventListener("click", closeCart);
+    $("#cartCheckoutBtn").addEventListener("click", () => alert("結帳流程（可接 Stripe / 或你的結帳頁）"));
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        closeCart();
+        closeImgModal();
       }
-      if (linkEl) linkEl.href = "#";
-    } else {
-      if (mainImg) {
-        mainImg.style.objectFit = "cover";
-        mainImg.style.background = "#fff";
-      }
-      setIndex(0);
-    }
-
-    imgModal.style.display = "flex";
-  };
-
-  const closeModal = () => {
-    if (!imgModal) return;
-    imgModal.style.display = "none";
-  };
-
-  const stepModal = (delta) => {
-    if (!imgModal || imgModal.style.display !== "flex") return;
-    if (!modalImages.length) return;
-    const next = modalIndex + delta;
-    // reuse setIndex by simulating click on thumb
-    const modal = ensureModalInner();
-    const thumbs = $("#imgThumbs", modal);
-    const btn = thumbs?.querySelector(`button[data-idx="${(next + modalImages.length) % modalImages.length}"]`);
-    if (btn) btn.click();
-  };
-
-  // --- UI builders ---
-  const buildCategoryPills = () => {
-    if (!categoryBar) return;
-
-    const catsFromData = ALL_PRODUCTS
-      .map((p) => String(p.category || "").trim())
-      .filter(Boolean);
-
-    // keep order you want
-    const preset = ["全部", "項鍊", "手鏈", "耳環", "戒指"];
-    const dynamic = Array.from(new Set(catsFromData)).filter((c) => !preset.includes(c));
-    const cats = [...preset, ...dynamic].filter((c, i, a) => a.indexOf(c) === i);
-
-    categoryBar.innerHTML = cats
-      .map((c) => {
-        const active = c === CURRENT_CAT;
-        return `
-          <button class="cat-pill" data-cat="${escapeHtml(c)}"
-            style="flex:0 0 auto; padding:8px 14px; border-radius:999px; border:1px solid rgba(0,0,0,0.12);
-              background:${active ? "rgba(34,52,40,0.88)" : "rgba(255,255,255,0.55)"};
-              color:${active ? "#fff" : "rgba(40,40,40,0.86)"};
-              font-size:13px; cursor:pointer; white-space:nowrap;">
-            ${escapeHtml(c)}
-          </button>
-        `;
-      })
-      .join("");
-
-    $$("button[data-cat]", categoryBar).forEach((btn) => {
-      btn.addEventListener("click", () => {
-        CURRENT_CAT = btn.dataset.cat || "全部";
-        buildCategoryPills();
-        renderProducts();
-      });
     });
   };
 
-  const renderProducts = () => {
-    const list =
-      CURRENT_CAT === "全部"
-        ? ALL_PRODUCTS
-        : ALL_PRODUCTS.filter((p) => String(p.category || "").trim() === CURRENT_CAT);
+  const openCart = () => {
+    ensureCartDrawer();
+    const drawer = document.getElementById("cartDrawer");
+    if (drawer) drawer.classList.add("isOpen");
+    renderCart();
+  };
 
-    if (!list.length) {
-      productsGrid.innerHTML = `<div style="padding:14px 4px; opacity:.75; font-size:13px;">目前沒有商品。</div>`;
+  const closeCart = () => {
+    const drawer = document.getElementById("cartDrawer");
+    if (drawer) drawer.classList.remove("isOpen");
+  };
+
+  const updateCartBadge = () => {
+    const badge = document.getElementById("cartCount");
+    if (!badge) return;
+    const total = loadCart().reduce((s, it) => s + (Number(it.qty) || 0), 0);
+    badge.textContent = String(total);
+    badge.style.display = total > 0 ? "inline-flex" : "none";
+  };
+
+  const addToCart = (product, styleName, qty) => {
+    const cart = loadCart();
+    const key = `${product.id || product.name || "item"}__${styleName || ""}`;
+    const idx = cart.findIndex((x) => x.key === key);
+
+    const item = {
+      key,
+      id: product.id || "",
+      name: product.name || "",
+      style: styleName || "",
+      price: Number(product.price) || 0,
+      image: normalizeImages(product.images)[0] || "",
+      qty: Math.max(1, Number(qty) || 1),
+    };
+
+    if (idx >= 0) cart[idx].qty += item.qty;
+    else cart.push(item);
+
+    saveCart(cart);
+    openCart();
+  };
+
+  const setCartQty = (key, qty) => {
+    const cart = loadCart();
+    const it = cart.find((x) => x.key === key);
+    if (!it) return;
+    it.qty = Math.max(1, Number(qty) || 1);
+    saveCart(cart);
+    renderCart();
+  };
+
+  const removeFromCart = (key) => {
+    saveCart(loadCart().filter((x) => x.key !== key));
+    renderCart();
+  };
+
+  const renderCart = () => {
+    ensureCartDrawer();
+    const wrap = document.getElementById("cartItems");
+    const subtotalEl = document.getElementById("cartSubtotal");
+    const cart = loadCart();
+    subtotalEl.textContent = ntd(calcSubtotal());
+
+    if (!cart.length) {
+      wrap.innerHTML = `<div class="empty">購物車目前是空的。</div>`;
       return;
     }
 
-    productsGrid.innerHTML = list
-      .map((p) => {
-        const imgs = normalizeImages(p.images);
-        const cover = imgs[0] || "";
-        const styles = normalizeStyles(p.styles);
-        const hasStyles = styles.length > 0;
-
+    wrap.innerHTML = cart
+      .map((it) => {
+        const img = it.image
+          ? `<img src="${escapeHtml(it.image)}" alt="">`
+          : `<div class="ph"></div>`;
         return `
-          <div class="product-card" style="border-radius:18px; background:rgba(255,255,255,0.55);
-            border:1px solid rgba(0,0,0,0.08); overflow:hidden;">
-            <button type="button" class="open-modal" data-key="${escapeHtml(p.id || p.name || "")}"
-              style="border:0; background:transparent; padding:0; cursor:pointer; display:block; width:100%;">
-              <div style="width:100%; height:220px; background:rgba(0,0,0,0.05);">
-                ${
-                  cover
-                    ? `<img src="${escapeHtml(cover)}" alt="${escapeHtml(p.name || "")}"
-                        style="width:100%; height:220px; object-fit:cover; display:block;">`
-                    : `<div style="width:100%; height:220px; display:flex; align-items:center; justify-content:center; opacity:.5; font-size:12px;">No Image</div>`
-                }
-              </div>
-            </button>
-
-            <div style="padding:12px 12px 14px;">
-              <div style="display:flex; justify-content:space-between; gap:10px;">
-                <div style="min-width:0;">
-                  <div style="font-size:13px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                    ${escapeHtml(p.name || "")}
-                  </div>
-                  <div style="margin-top:4px; font-size:12px; opacity:.65;">
-                    ${escapeHtml(p.collection || "")}${p.collection && p.category ? " · " : ""}${escapeHtml(p.category || "")}
-                    ${p.id ? " · " + escapeHtml(p.id) : ""}
-                  </div>
-                </div>
-                <div style="text-align:right;">
-                  <div style="font-size:13px; font-weight:700;">NT$ ${ntd(p.price)}</div>
-                  ${p.status ? `<div style="margin-top:3px; font-size:11px; opacity:.6;">${escapeHtml(p.status)}</div>` : ""}
+          <div class="cartItem">
+            <div class="thumbWrap">${img}</div>
+            <div class="info">
+              <div class="name">${escapeHtml(it.name)}${it.style ? ` <span>(${escapeHtml(it.style)})</span>` : ""}</div>
+              <div class="meta">
+                <div>NT$ ${ntd(it.price)}</div>
+                <div class="qty">
+                  <button data-dec="${escapeHtml(it.key)}">-</button>
+                  <input data-qty="${escapeHtml(it.key)}" value="${Number(it.qty) || 1}">
+                  <button data-inc="${escapeHtml(it.key)}">+</button>
                 </div>
               </div>
-
-              ${
-                hasStyles
-                  ? `<div style="margin-top:10px;">
-                      <div style="font-size:12px; opacity:.75; margin-bottom:6px;">款式</div>
-                      <select data-style="${escapeHtml(p.id || p.name || "")}"
-                        style="width:100%; padding:9px 10px; border-radius:12px; border:1px solid rgba(0,0,0,0.12); background:rgba(255,255,255,0.65);">
-                        ${styles.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("")}
-                      </select>
-                    </div>`
-                  : ""
-              }
-
-              <div style="margin-top:10px; display:flex; align-items:center; justify-content:space-between; gap:10px;">
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <button type="button" data-dec="${escapeHtml(p.id || p.name || "")}"
-                    style="width:30px; height:30px; border-radius:10px; border:1px solid rgba(0,0,0,0.15); background:#fff; cursor:pointer;">-</button>
-                  <input data-qty="${escapeHtml(p.id || p.name || "")}" value="1" inputmode="numeric"
-                    style="width:44px; height:30px; border-radius:10px; border:1px solid rgba(0,0,0,0.15); text-align:center;">
-                  <button type="button" data-inc="${escapeHtml(p.id || p.name || "")}"
-                    style="width:30px; height:30px; border-radius:10px; border:1px solid rgba(0,0,0,0.15); background:#fff; cursor:pointer;">+</button>
-                </div>
-
-                <button type="button" class="add-cart" data-key="${escapeHtml(p.id || p.name || "")}"
-                  style="padding:10px 12px; border-radius:14px; border:0; background:rgba(34,52,40,0.88); color:#fff; cursor:pointer; font-size:13px; white-space:nowrap;">
-                  加入購物車
-                </button>
+              <div class="line">
+                <div>小計：NT$ ${ntd((Number(it.price) || 0) * (Number(it.qty) || 0))}</div>
+                <button class="rm" data-rm="${escapeHtml(it.key)}">移除</button>
               </div>
             </div>
           </div>
@@ -354,77 +319,244 @@ document.addEventListener("DOMContentLoaded", () => {
       })
       .join("");
 
-    // bind modal open
-    $$(".open-modal", productsGrid).forEach((btn) => {
+    $$("[data-rm]", wrap).forEach((b) => b.addEventListener("click", () => removeFromCart(b.dataset.rm)));
+    $$("[data-inc]", wrap).forEach((b) =>
+      b.addEventListener("click", () => {
+        const key = b.dataset.inc;
+        const it = loadCart().find((x) => x.key === key);
+        if (!it) return;
+        setCartQty(key, (Number(it.qty) || 1) + 1);
+      })
+    );
+    $$("[data-dec]", wrap).forEach((b) =>
+      b.addEventListener("click", () => {
+        const key = b.dataset.dec;
+        const it = loadCart().find((x) => x.key === key);
+        if (!it) return;
+        setCartQty(key, Math.max(1, (Number(it.qty) || 1) - 1));
+      })
+    );
+    $$("[data-qty]", wrap).forEach((inp) =>
+      inp.addEventListener("change", () => {
+        const key = inp.dataset.qty;
+        const v = Number(String(inp.value).replace(/[^\d]/g, "")) || 1;
+        inp.value = String(v);
+        setCartQty(key, v);
+      })
+    );
+  };
+
+  // ===== 商品列表 =====
+  let ALL_PRODUCTS = [];
+  let CURRENT_CATEGORY = "全部";
+
+  const ensureProductArea = () => {
+    const main = document.querySelector("main") || document.body;
+    // 公告容器（如果你本來有 noticeWrap 就用）
+    ensureEl("noticeWrap", "div", main, "noticeWrap");
+    // 商品容器
+    const wrap = ensureEl("productsWrap", "section", main, "productsWrap");
+    ensureEl("categoryBar", "div", wrap, "categoryBar");
+    ensureEl("productsGrid", "div", wrap, "productsGrid");
+  };
+
+  const buildCategoryPills = (products) => {
+    const bar = document.getElementById("categoryBar");
+    if (!bar) return;
+
+    const cats = uniq(["全部", ...products.map((p) => String(p.category || "").trim()).filter(Boolean)]);
+
+    bar.innerHTML = cats
+      .map((c) => {
+        const active = c === CURRENT_CATEGORY;
+        return `
+          <button class="pill ${active ? "isActive" : ""}" data-cat="${escapeHtml(c)}">${escapeHtml(c)}</button>
+        `;
+      })
+      .join("");
+
+    $$("button[data-cat]", bar).forEach((btn) => {
       btn.addEventListener("click", () => {
-        const key = btn.dataset.key;
-        const product = ALL_PRODUCTS.find((x) => String(x.id || x.name) === String(key));
-        if (product) renderModal(product);
+        CURRENT_CATEGORY = btn.dataset.cat || "全部";
+        const filtered =
+          CURRENT_CATEGORY === "全部" ? ALL_PRODUCTS : ALL_PRODUCTS.filter((p) => String(p.category || "") === CURRENT_CATEGORY);
+        buildCategoryPills(ALL_PRODUCTS);
+        renderProducts(filtered);
+      });
+    });
+  };
+
+  const renderNotice = (noticeArr) => {
+    const wrap = document.getElementById("noticeWrap");
+    if (!wrap) return;
+
+    const list = Array.isArray(noticeArr) ? noticeArr : [];
+    const active = list.filter((n) => String(n.active).toLowerCase() !== "false" && n.active !== 0);
+
+    if (!active.length) {
+      wrap.innerHTML = "";
+      return;
+    }
+
+    wrap.innerHTML = active
+      .map((n) => {
+        const title = escapeHtml(n.title || "公告");
+        const content = escapeHtml(n.content || "");
+        return `
+          <div class="noticeCard">
+            <div class="noticeHead">
+              <span class="noticeTag">公告</span>
+              <div class="noticeTitle">${title}</div>
+            </div>
+            ${content ? `<div class="noticeBody">${content.replaceAll("\n", "<br>")}</div>` : ""}
+          </div>
+        `;
+      })
+      .join("");
+  };
+
+  const renderProducts = (products) => {
+    const grid = document.getElementById("productsGrid");
+    if (!grid) return;
+
+    if (!products.length) {
+      grid.innerHTML = `<div class="empty">目前沒有商品。</div>`;
+      return;
+    }
+
+    grid.innerHTML = products
+      .map((p) => {
+        const key = String(p.id || p.name || "");
+        const imgs = normalizeImages(p.images);
+        const cover = imgs[0] || "";
+        const styles = normalizeStyles(p.styles);
+        return `
+          <div class="productCard">
+            <button class="imgBtn" data-open="${escapeHtml(key)}" aria-label="查看圖片">
+              ${cover ? `<img src="${escapeHtml(cover)}" alt="">` : `<div class="imgEmpty">No Image</div>`}
+            </button>
+            <div class="cardBody">
+              <div class="rowTop">
+                <div class="name">${escapeHtml(p.name || "")}</div>
+                <div class="price">NT$ ${ntd(p.price)}</div>
+              </div>
+              <div class="meta">
+                ${escapeHtml(p.collection || "")}${p.collection && p.category ? " · " : ""}${escapeHtml(p.category || "")}
+                ${p.id ? ` · ${escapeHtml(p.id)}` : ""}
+                ${p.status ? `<span class="status">${escapeHtml(p.status)}</span>` : ""}
+              </div>
+
+              ${styles.length ? `
+                <div class="field">
+                  <div class="label">款式</div>
+                  <select data-style="${escapeHtml(key)}">
+                    ${styles.map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join("")}
+                  </select>
+                </div>` : ""}
+
+              <div class="actions">
+                <div class="qty">
+                  <button data-dec="${escapeHtml(key)}">-</button>
+                  <input data-qty="${escapeHtml(key)}" value="1">
+                  <button data-inc="${escapeHtml(key)}">+</button>
+                </div>
+                <button class="addBtn" data-add="${escapeHtml(key)}">加入購物車</button>
+              </div>
+            </div>
+          </div>
+        `;
+      })
+      .join("");
+
+    // modal
+    $$("[data-open]", grid).forEach((b) => {
+      b.addEventListener("click", () => {
+        const key = b.dataset.open;
+        const product = ALL_PRODUCTS.find((x) => String(x.id || x.name || "") === String(key));
+        if (product) openImgModal(product);
       });
     });
 
-    // qty controls
-    const getQtyInput = (key) => productsGrid.querySelector(`input[data-qty="${CSS.escape(key)}"]`);
-
-    $$("button[data-inc]", productsGrid).forEach((b) => {
+    // qty
+    const getQtyInput = (key) => grid.querySelector(`[data-qty="${CSS.escape(key)}"]`);
+    $$("[data-inc]", grid).forEach((b) =>
       b.addEventListener("click", () => {
         const key = b.dataset.inc;
         const inp = getQtyInput(key);
         if (!inp) return;
         const v = Number(String(inp.value).replace(/[^\d]/g, "")) || 1;
         inp.value = String(Math.min(99, v + 1));
-      });
-    });
-
-    $$("button[data-dec]", productsGrid).forEach((b) => {
+      })
+    );
+    $$("[data-dec]", grid).forEach((b) =>
       b.addEventListener("click", () => {
         const key = b.dataset.dec;
         const inp = getQtyInput(key);
         if (!inp) return;
         const v = Number(String(inp.value).replace(/[^\d]/g, "")) || 1;
         inp.value = String(Math.max(1, v - 1));
-      });
-    });
-
-    $$("input[data-qty]", productsGrid).forEach((inp) => {
+      })
+    );
+    $$("[data-qty]", grid).forEach((inp) =>
       inp.addEventListener("change", () => {
         const v = Number(String(inp.value).replace(/[^\d]/g, "")) || 1;
         inp.value = String(Math.max(1, Math.min(99, v)));
-      });
-    });
+      })
+    );
 
-    // add-to-cart (if your site has cart implementation, hook here; otherwise no-op)
-    $$(".add-cart", productsGrid).forEach((btn) => {
-      btn.addEventListener("click", () => {
-        // If you already have cart logic elsewhere, you can replace this block.
-        alert("已加入購物車（示範版）");
-      });
-    });
+    // add cart
+    $$("[data-add]", grid).forEach((b) =>
+      b.addEventListener("click", () => {
+        const key = b.dataset.add;
+        const product = ALL_PRODUCTS.find((x) => String(x.id || x.name || "") === String(key));
+        if (!product) return;
+
+        const qtyInp = getQtyInput(key);
+        const qty = qtyInp ? Number(String(qtyInp.value).replace(/[^\d]/g, "")) || 1 : 1;
+
+        const sel = grid.querySelector(`[data-style="${CSS.escape(key)}"]`);
+        const styleName = sel ? sel.value || "" : "";
+
+        addToCart(product, styleName, qty);
+      })
+    );
   };
 
-  // --- fetch ---
+  // ===== 綁定右上 icon（如果你 HTML 有 iconCart / cartCount）=====
+  const bindTopIconsIfExist = () => {
+    const cart = document.getElementById("iconCart");
+    if (cart) cart.addEventListener("click", (e) => (e.preventDefault(), openCart()));
+  };
+
+  // ===== 抓資料 =====
   const fetchData = async () => {
     try {
       const res = await fetch(API_URL, { cache: "no-store" });
       const data = await res.json();
-      const products = Array.isArray(data.products) ? data.products : [];
-      // only show "上架" by default if status exists
-      ALL_PRODUCTS = products.filter((p) => !p.status || String(p.status).trim() !== "下架");
-      buildCategoryPills();
-      renderProducts();
+
+      ALL_PRODUCTS = Array.isArray(data.products) ? data.products : [];
+      const notice = Array.isArray(data.notice) ? data.notice : [];
+
+      buildCategoryPills(ALL_PRODUCTS);
+      renderProducts(ALL_PRODUCTS);
+      renderNotice(notice);
+      updateCartBadge();
     } catch (e) {
-      console.error(e);
-      productsGrid.innerHTML = `
-        <div style="padding:14px 4px; border-radius:14px; border:1px solid rgba(255,0,0,0.15); background:rgba(255,0,0,0.06);">
-          <div style="font-weight:700; font-size:13px;">商品資料載入失敗</div>
-          <div style="margin-top:6px; font-size:12px; opacity:.8; line-height:1.7;">
-            請確認 Google Apps Script Web App 可公開存取，並回傳 JSON。<br>
-            （按 F12 → Console 可看到詳細錯誤）
-          </div>
-        </div>
-      `;
+      console.error("API 錯誤", e);
+      const wrap = document.getElementById("noticeWrap");
+      if (wrap) {
+        wrap.innerHTML = `<div class="noticeCard" style="border-color:rgba(255,0,0,.18);background:rgba(255,0,0,.06)">
+          <div class="noticeTitle">資料載入失敗</div>
+          <div class="noticeBody">請確認 GAS 已部署為「網頁應用程式」，且允許存取。</div>
+        </div>`;
+      }
     }
   };
 
+  // ===== init =====
+  ensureProductArea();
+  ensureCartDrawer();
+  ensureImgModal();
+  bindTopIconsIfExist();
   fetchData();
 });
